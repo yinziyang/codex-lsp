@@ -1,0 +1,251 @@
+// lsp 工具与安装计划（验收 B-9 的完整链路、B-10、B-11，G-2、G-3 的判定逻辑）。
+
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import type { LspSettings, ServerConfig } from "../extensions/pi-lsp/config.ts";
+import { DiagnosticsHub } from "../extensions/pi-lsp/diagnostics.ts";
+import { installHint, installPlan, runInstall, type Exec } from "../extensions/pi-lsp/install.ts";
+import { type ManagerOptions, ServerManager } from "../extensions/pi-lsp/manager.ts";
+import { Router } from "../extensions/pi-lsp/routing.ts";
+import { PROMPT_GUIDELINES, PROMPT_SNIPPET, TOOL_DESCRIPTION, createLspTool, runLsp, type ToolRuntime } from "../extensions/pi-lsp/tool.ts";
+import { fakeServer, readLog, tempDir, writeFile } from "./fixtures.ts";
+
+/** 就绪等待默认最少 1 秒；测试里除专门测它的用例外都关掉，免得每个用例多等 1 秒。 */
+const NO_WAIT = { minMs: 0, quietMs: 0, maxMs: 0 };
+
+function runtime(servers: ServerConfig[], cwd = tempDir(), onMissing?: ToolRuntime["onMissing"], readiness: ManagerOptions["readiness"] = NO_WAIT): ToolRuntime & { manager: ServerManager } {
+	const settings: LspSettings = { servers, idleTimeoutMs: 60_000, autoInstall: false, diagnostics: true };
+	const router = new Router(servers, { cwd, toolDirs: [], env: process.env });
+	const manager = new ServerManager({ router, settings, hub: new DiagnosticsHub(cwd), readiness });
+	return { manager, cwd, onMissing: onMissing ?? (async () => ({ installed: false, note: "" })) };
+}
+
+const range = (line: number) => ({ start: { line, character: 0 }, end: { line, character: 3 } });
+
+test("B-9 链路：参数 1 基转 0 基，结果按 Claude Code 格式输出", async () => {
+	const cwd = tempDir();
+	const log = join(tempDir(), "log");
+	const file = writeFile(cwd, "a.fake", "x");
+	const rt = runtime([fakeServer("fake", { log, responses: { "textDocument/definition": { uri: `file://${join(cwd, "b.fake")}`, range: range(4) } } })], cwd);
+	const out = await runLsp(rt, { operation: "goToDefinition", filePath: "a.fake", line: 3, character: 7 });
+	assert.equal(out, "Defined in b.fake:5:1");
+	const req = readLog(log).find((e) => e.method === "textDocument/definition")?.params as { position: unknown; textDocument: { uri: string } };
+	assert.deepEqual(req.position, { line: 2, character: 6 });
+	assert.equal(req.textDocument.uri, `file://${file}`);
+	assert.ok(readLog(log).some((e) => e.method === "textDocument/didOpen"), "查询前先打开文件");
+	await rt.manager.shutdownAll();
+});
+
+test("B-9 findReferences 带 includeDeclaration；workspaceSymbol 传 query", async () => {
+	const cwd = tempDir();
+	const log = join(tempDir(), "log");
+	writeFile(cwd, "a.fake", "x");
+	const rt = runtime([fakeServer("fake", { log })], cwd);
+	await runLsp(rt, { operation: "findReferences", filePath: "a.fake", line: 1, character: 1 });
+	await runLsp(rt, { operation: "workspaceSymbol", filePath: "a.fake", line: 1, character: 1, query: "Foo" });
+	const ev = readLog(log);
+	assert.deepEqual((ev.find((e) => e.method === "textDocument/references")?.params as { context: unknown }).context, { includeDeclaration: true });
+	assert.deepEqual(ev.find((e) => e.method === "workspace/symbol")?.params, { query: "Foo" });
+	await rt.manager.shutdownAll();
+});
+
+test("B-9 incomingCalls 先 prepare 再用第一项查询；prepare 为空时返回提示", async () => {
+	const cwd = tempDir();
+	const log = join(tempDir(), "log");
+	writeFile(cwd, "a.fake", "x");
+	const item = { name: "f", kind: 12, uri: `file://${join(cwd, "a.fake")}`, range: range(0), selectionRange: range(0) };
+	const caller = { name: "main", kind: 12, uri: `file://${join(cwd, "m.fake")}`, range: range(9), selectionRange: range(9) };
+	const rt = runtime([fakeServer("fake", { log, responses: { "textDocument/prepareCallHierarchy": [item, { ...item, name: "g" }], "callHierarchy/incomingCalls": [{ from: caller, fromRanges: [range(10)] }] } })], cwd);
+	assert.equal(await runLsp(rt, { operation: "incomingCalls", filePath: "a.fake", line: 1, character: 1 }), "Found 1 incoming call:\n\nm.fake:\n  main (Function) - Line 10 [calls at: 11:1]");
+	assert.deepEqual((readLog(log).find((e) => e.method === "callHierarchy/incomingCalls")?.params as { item: { name: string } }).item.name, "f");
+	await rt.manager.shutdownAll();
+	const empty = runtime([fakeServer("fake", {})], cwd);
+	assert.match(await runLsp(empty, { operation: "outgoingCalls", filePath: "a.fake", line: 1, character: 1 }), /^No call hierarchy item found at this position\n\nLine 1: x\n/, "V5：prepare 为空时附上该行的标识符");
+	await empty.manager.shutdownAll();
+});
+
+test("B-9 定义与引用的结果过滤掉被 gitignore 的路径", async () => {
+	const cwd = tempDir();
+	execFileSync("git", ["init", "-q"], { cwd });
+	writeFileSync(join(cwd, ".gitignore"), "gen/\n");
+	mkdirSync(join(cwd, "gen"));
+	writeFile(cwd, "a.fake", "x");
+	const refs = [{ uri: `file://${join(cwd, "a.fake")}`, range: range(0) }, { uri: `file://${join(cwd, "gen", "z.fake")}`, range: range(1) }];
+	const rt = runtime([fakeServer("fake", { responses: { "textDocument/references": refs } })], cwd);
+	assert.equal(await runLsp(rt, { operation: "findReferences", filePath: "a.fake", line: 1, character: 1 }), "Found 1 reference:\n  a.fake:1:1");
+	await rt.manager.shutdownAll();
+});
+
+test("V5 位置类操作落空或服务器报错时附上该行原文与标识符列号，命中、非位置类操作与超时不附", async () => {
+	const cwd = tempDir();
+	writeFile(cwd, "a.fake", "package main\n\treturn shopdb.Orders.Get(ctx, r.db, id)\n}) // --\n");
+	const def = { uri: `file://${join(cwd, "a.fake")}`, range: range(0) };
+	const rt = runtime([fakeServer("fake", { responses: { "textDocument/references": [def] }, errors: { "textDocument/hover": { code: 0, message: "column is beyond end of line" } } })], cwd);
+	const hint = "Line 2: return shopdb.Orders.Get(ctx, r.db, id)\nIdentifiers on this line (name character): return 2, shopdb 9, Orders 16, Get 23, ctx 27, r 32, db 34, id 38\nIf the position was off, retry with the character of the identifier you meant.";
+	// 期望列号按原文手数：第 1 列是制表符，return 从第 2 列开始。
+	assert.equal(await runLsp(rt, { operation: "goToDefinition", filePath: "a.fake", line: 2, character: 60 }), `No definition found. This may occur if the cursor is not on a symbol, or if the definition is in an external library not indexed by the LSP server.\n\n${hint}`);
+	assert.equal(await runLsp(rt, { operation: "hover", filePath: "a.fake", line: 2, character: 60 }), `Error performing hover: LSP request 'textDocument/hover' failed for server 'fake': column is beyond end of line\n\n${hint}`);
+	assert.match(await runLsp(rt, { operation: "goToDefinition", filePath: "a.fake", line: 3, character: 1 }), /\n\nLine 3 has no identifiers: }\) \/\/ --$/);
+	assert.match(await runLsp(rt, { operation: "goToDefinition", filePath: "a.fake", line: 9, character: 1 }), /\n\nLine 9 is past the end of the file, which has 4 lines\.$/);
+	assert.equal(await runLsp(rt, { operation: "findReferences", filePath: "a.fake", line: 2, character: 16 }), "Found 1 reference:\n  a.fake:1:1", "命中时不附");
+	assert.equal(await runLsp(rt, { operation: "documentSymbol", filePath: "a.fake", line: 2, character: 60 }), "No symbols found in document. This may occur if the file is empty, not supported by the LSP server, or if the server has not fully indexed the file.", "不按位置的操作不附");
+	await rt.manager.shutdownAll();
+});
+
+test("B-10 报错文本：参数不合法、文件不存在、不是普通文件时抛错；没有服务器时返回 Claude Code 同款文本", async () => {
+	const cwd = tempDir();
+	mkdirSync(join(cwd, "dir.fake"));
+	writeFile(cwd, "a.txt", "x");
+	const rt = runtime([fakeServer("fake", {})], cwd);
+	await assert.rejects(runLsp(rt, { operation: "hover", filePath: "missing.fake", line: 1, character: 1 }), /^Error: File does not exist: missing\.fake$/);
+	await assert.rejects(runLsp(rt, { operation: "hover", filePath: "dir.fake", line: 1, character: 1 }), /^Error: Path is not a file: dir\.fake$/);
+	await assert.rejects(runLsp(rt, { operation: "hover", filePath: "a.txt", line: 0, character: 1 }), /Invalid input: line must be a positive integer/);
+	assert.equal(await runLsp(rt, { operation: "hover", filePath: "a.txt", line: 1, character: 1 }), "No LSP server available for file type: .txt");
+	await rt.manager.shutdownAll();
+});
+
+test("B-10 服务器报错时作为普通结果返回 Error performing …", async () => {
+	const cwd = tempDir();
+	writeFile(cwd, "a.fake", "x");
+	const rt = runtime([fakeServer("fake", { neverRespond: ["textDocument/hover"] }, { requestTimeout: 300 })], cwd);
+	assert.equal(await runLsp(rt, { operation: "hover", filePath: "a.fake", line: 1, character: 1 }), "Error performing hover: LSP request 'textDocument/hover' failed for server 'fake': request timed out after 300ms");
+	await rt.manager.shutdownAll();
+});
+
+test("B-10 超过 10MB 的文件不交给服务器", async () => {
+	const cwd = tempDir();
+	writeFile(cwd, "big.fake", "x".repeat(10_000_001));
+	const rt = runtime([fakeServer("fake", {})], cwd);
+	assert.equal(await runLsp(rt, { operation: "documentSymbol", filePath: "big.fake", line: 1, character: 1 }), "File too large for LSP analysis (11MB exceeds 10MB limit)");
+	await rt.manager.shutdownAll();
+});
+
+test("服务器没装时：返回 Claude Code 同款文本并附上安装说明", async () => {
+	const cwd = tempDir();
+	writeFile(cwd, "a.fake", "x");
+	const missing = { ...fakeServer("fake", {}), command: "/nonexistent/fake-lsp" };
+	const rt = runtime([missing], cwd, async () => ({ installed: false, note: "Run /lsp install fake." }));
+	assert.equal(await runLsp(rt, { operation: "hover", filePath: "a.fake", line: 1, character: 1 }), "No LSP server available for file type: .fake\n\nRun /lsp install fake.");
+});
+
+test("B-11 工具的参数定义与 Claude Code 一致，说明是原文加 V4 的一句", () => {
+	const tool = createLspTool(() => undefined);
+	assert.equal(tool.name, "lsp");
+	const schema = tool.parameters as unknown as { properties: Record<string, { type?: string; enum?: string[]; exclusiveMinimum?: number }>; required: string[] };
+	assert.deepEqual(Object.keys(schema.properties), ["operation", "filePath", "line", "character", "query"]);
+	assert.deepEqual(schema.required.sort(), ["character", "filePath", "line", "operation"]);
+	assert.deepEqual(schema.properties.operation.enum, ["goToDefinition", "findReferences", "hover", "documentSymbol", "workspaceSymbol", "goToImplementation", "prepareCallHierarchy", "incomingCalls", "outgoingCalls"]);
+	assert.equal(schema.properties.operation.type, "string", "用 string enum，不用 anyOf");
+	assert.equal(schema.properties.line.exclusiveMinimum, 0);
+	assert.ok(TOOL_DESCRIPTION.startsWith("Interact with Language Server Protocol (LSP) servers to get code intelligence features."));
+	assert.ok(TOOL_DESCRIPTION.includes("Note: LSP servers must be configured for the file type. If no server is available, an error will be returned."));
+	assert.ok(TOOL_DESCRIPTION.endsWith("Prefer this tool over grep when looking up where a symbol is defined, its references, its implementations, or its callers."));
+});
+
+test("B-11 V4：工具进入 pi 系统提示的工具列表，引导按任务写、覆盖依赖源码、不可用时退回 grep / rg", () => {
+	const tool = createLspTool(() => undefined);
+	// pi 只把填了 promptSnippet 的自定义工具列进 Available tools。
+	assert.equal(tool.promptSnippet, PROMPT_SNIPPET);
+	assert.deepEqual(tool.promptGuidelines, PROMPT_GUIDELINES);
+	assert.equal(PROMPT_GUIDELINES.length, 3);
+	assert.match(PROMPT_GUIDELINES[0], /^Prefer the lsp tool for any question about code entities/);
+	assert.match(PROMPT_GUIDELINES[0], /You do not need the exact name or position up front/);
+	assert.match(PROMPT_GUIDELINES[1], /dependency outside the workspace.*goToDefinition or hover on an import or a usage/);
+	assert.match(PROMPT_GUIDELINES[2], /^Fall back to grep or rg when lsp reports no server/);
+	for (const g of PROMPT_GUIDELINES) assert.doesNotMatch(g, /\b(never|must not|do not use)\b/i, "引导不写成绝对禁止");
+});
+
+test("G-3 安装计划：npm 类装进本扩展目录；缺 go、缺 rustup 时说清楚缺什么；clangd 只给说明", () => {
+	const ctx = (have: string[]) => ({ lspDir: "/L", platform: "darwin" as NodeJS.Platform, resolve: (c: string) => (have.includes(c) ? `/bin/${c}` : undefined) });
+	const ts = installPlan("typescript", ctx(["npm"]));
+	assert.ok(!("error" in ts));
+	assert.deepEqual((ts as { steps: { args: string[] }[] }).steps[0].args.slice(0, 3), ["install", "--prefix", "/L/node"]);
+	assert.equal((installPlan("go", ctx(["go"])) as { steps: { env: Record<string, string> }[] }).steps[0].env.GOBIN, "/L/bin");
+	assert.match((installPlan("go", ctx([])) as { error: string }).error, /needs the Go toolchain/);
+	assert.match((installPlan("rust", ctx([])) as { error: string }).error, /needs rustup/);
+	assert.match((installPlan("cpp", ctx(["npm"])) as { error: string }).error, /xcode-select --install/);
+	assert.match((installPlan("cobol", ctx([])) as { error: string }).error, /Unknown language/);
+	assert.match(installHint("gopls", ctx(["go"])), /Run \/lsp install go/);
+});
+
+test("G-2 安装执行：按步骤执行，失败即停并带上输出", async () => {
+	const calls: string[][] = [];
+	const exec: Exec = async (cmd, args) => {
+		calls.push([cmd, ...args]);
+		return { code: calls.length === 1 ? 0 : 1, stdout: "out", stderr: "boom" };
+	};
+	const plan = { server: "x", label: "x", steps: [{ command: "a", args: ["1"] }, { command: "b", args: ["2"] }, { command: "c", args: [] }] };
+	const seenPath: string[] = [];
+	const spy: Exec = async (cmd, args, o) => {
+		seenPath.push(o.env?.PATH ?? "");
+		return exec(cmd, args, o);
+	};
+	const r = await runInstall(plan, spy, { PATH: "/usr/bin" });
+	assert.ok(seenPath[0].startsWith((await import("node:path")).dirname(process.execPath)), "pi 所用的 node 在 PATH 最前，npm 这类 node 脚本才跑得起来");
+	assert.equal(r.ok, false);
+	assert.equal(calls.length, 2, "第二步失败后不再执行第三步");
+	assert.match(r.output, /boom/);
+});
+
+// D13：服务器刚启动、还在加载工程时，导航请求会静默返回不完整的结果（实测 typescript-language-server 只返回当前文件里的引用，rust-analyzer 返回空，pyright 只返回 1 条）。
+// 第一次导航请求前先等实例就绪：启动后至少 minMs，启动阶段开始的进度全部结束，且 quietMs 内没有新进度；最多等 maxMs。
+const loc = (cwd: string, name: string, line: number) => ({ uri: `file://${join(cwd, name)}`, range: range(line) });
+const refsScript = (cwd: string, extra: Record<string, unknown>) => ({
+	responses: { "textDocument/references": [loc(cwd, "a.fake", 0), loc(cwd, "b.fake", 1), loc(cwd, "c.fake", 2)] },
+	warmup: { ms: 600, responses: { "textDocument/references": [loc(cwd, "a.fake", 0)] } },
+	...extra,
+});
+
+test("D13 启动阶段有进度时，等进度结束再查，拿到完整结果", async () => {
+	const cwd = tempDir();
+	writeFile(cwd, "a.fake", "x");
+	const rt = runtime([fakeServer("fake", refsScript(cwd, { progress: [{ token: "load", beginMs: 0, endMs: 600 }] }))], cwd, undefined, { minMs: 100, quietMs: 100, maxMs: 5000 });
+	const out = await runLsp(rt, { operation: "findReferences", filePath: "a.fake", line: 1, character: 1 });
+	assert.match(out, /^Found 3 references across 3 files:/, out);
+	await rt.manager.shutdownAll();
+});
+
+test("D13 服务器不发进度时，启动后至少等 minMs 再查", async () => {
+	const cwd = tempDir();
+	writeFile(cwd, "a.fake", "x");
+	const rt = runtime([fakeServer("fake", refsScript(cwd, {}))], cwd, undefined, { minMs: 800, quietMs: 100, maxMs: 5000 });
+	const out = await runLsp(rt, { operation: "findReferences", filePath: "a.fake", line: 1, character: 1 });
+	assert.match(out, /^Found 3 references/, out);
+	await rt.manager.shutdownAll();
+});
+
+test("D13 进度一直不结束时最多等 maxMs，照常返回结果", async () => {
+	const cwd = tempDir();
+	writeFile(cwd, "a.fake", "x");
+	const rt = runtime([fakeServer("fake", refsScript(cwd, { progress: [{ token: "stuck", beginMs: 0 }] }))], cwd, undefined, { minMs: 100, quietMs: 100, maxMs: 900 });
+	const t0 = Date.now();
+	const out = await runLsp(rt, { operation: "findReferences", filePath: "a.fake", line: 1, character: 1 });
+	assert.ok(Date.now() - t0 < 3000, `等待超过上限：${Date.now() - t0}ms`);
+	assert.match(out, /^Found 3 references/, "900ms 时 warmup 已过，拿到完整结果");
+	await rt.manager.shutdownAll();
+});
+
+test("D13 诊断类进度（token 含 flycheck，例如 rust-analyzer 的 cargo check）不参与就绪判断", async () => {
+	const cwd = tempDir();
+	writeFile(cwd, "a.fake", "x");
+	const rt = runtime([fakeServer("fake", { progress: [{ token: "rust-analyzer/flycheck/0", beginMs: 0 }] })], cwd, undefined, { minMs: 100, quietMs: 100, maxMs: 5000 });
+	const t0 = Date.now();
+	await runLsp(rt, { operation: "hover", filePath: "a.fake", line: 1, character: 1 });
+	assert.ok(Date.now() - t0 < 2000, `被 flycheck 进度拖住：${Date.now() - t0}ms`);
+	await rt.manager.shutdownAll();
+});
+
+test("D13 只等一次：就绪之后才开始的进度不再等待", async () => {
+	const cwd = tempDir();
+	writeFile(cwd, "a.fake", "x");
+	const rt = runtime([fakeServer("fake", { progress: [{ token: "later", beginMs: 700 }] })], cwd, undefined, { minMs: 100, quietMs: 100, maxMs: 5000 });
+	await runLsp(rt, { operation: "hover", filePath: "a.fake", line: 1, character: 1 });
+	await new Promise((r) => setTimeout(r, 900));
+	const t0 = Date.now();
+	await runLsp(rt, { operation: "hover", filePath: "a.fake", line: 1, character: 1 });
+	assert.ok(Date.now() - t0 < 500, `就绪后的进度仍在等待：${Date.now() - t0}ms`);
+	await rt.manager.shutdownAll();
+});

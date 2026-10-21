@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "codex-lsp": {
+      "command": "node",
+      "args": [
+        "dist/cli.js",
+        "serve"
+      ],
+      "cwd": ".",
+      "env_vars": [
+        "CODEX_LSP_DATA_HOME",
+        "CODEX_LSP_TRACE",
+        "VIRTUAL_ENV",
+        "CONDA_PREFIX",
+        "GOROOT",
+        "GOPATH",
+        "GOTOOLCHAIN",
+        "XDG_DATA_HOME",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "PATHEXT",
+        "USERDOMAIN",
+        "USERNAME"
+      ]
+    }
+  }
+}

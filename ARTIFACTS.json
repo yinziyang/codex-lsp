@@ -1,0 +1,31 @@
+{
+  "version": "0.1.0",
+  "sourceHash": "80b0ddc910537b777855c8b0cfda92005fa9f8e4906b5532de9f95b595e9aa16",
+  "buildHash": "16309ce065cf9289708f404e5fed4b9c9e6c39eb9398c32d0656fb5c0cd47ede",
+  "guardHash": "056bc1cac84da765a6692fc3e8a89d79793057eb0f2c6f9361401e524aea85ca",
+  "upstream": "ff1004afc819c6f39d217949784c712c0e68ca0e",
+  "codex": "83086188ae0614bd882818ff1aa23f3194962012",
+  "format": "official-legacy-plugin",
+  "artifacts": [
+    {
+      "path": "plugins/codex-lsp/dist/cli.js",
+      "bytes": 221524,
+      "sha256": "16309ce065cf9289708f404e5fed4b9c9e6c39eb9398c32d0656fb5c0cd47ede"
+    },
+    {
+      "path": "plugins/codex-lsp/dist/guard.js",
+      "bytes": 8174,
+      "sha256": "056bc1cac84da765a6692fc3e8a89d79793057eb0f2c6f9361401e524aea85ca"
+    },
+    {
+      "path": "plugins/codex-lsp/dist/build-info.json",
+      "bytes": 426,
+      "sha256": "843af7a0f205cde42d00013e48e32d20b75ae77006763d3f3a71672cdd42076a"
+    },
+    {
+      "path": "dist/plugin-install.mjs",
+      "bytes": 20553,
+      "sha256": "5a95a8cd41544dd3e6f971ea23cd9b457df238101e1c092707074f57878f9d7b"
+    }
+  ]
+}

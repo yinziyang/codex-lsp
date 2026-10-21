@@ -1,0 +1,17 @@
+{
+  "name": "codex-lsp-local",
+  "plugins": [
+    {
+      "name": "codex-lsp",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-lsp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer tools"
+    }
+  ]
+}

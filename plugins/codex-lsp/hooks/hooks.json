@@ -1,0 +1,107 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "codex-lsp",
+            "tool": "diagnostics_before_tool",
+            "input": {
+              "sessionId": "${session_id}",
+              "turnId": "${turn_id}",
+              "cwd": "${cwd}",
+              "toolUseId": "${tool_use_id}",
+              "toolName": "${tool_name}",
+              "toolInput": "${tool_input}"
+            },
+            "timeout": 5,
+            "statusMessage": "检查 LSP 诊断"
+          }
+        ],
+        "matcher": "^(apply_patch|Bash)$"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "codex-lsp",
+            "tool": "diagnostics_after_tool",
+            "input": {
+              "sessionId": "${session_id}",
+              "turnId": "${turn_id}",
+              "cwd": "${cwd}",
+              "toolUseId": "${tool_use_id}",
+              "toolName": "${tool_name}",
+              "toolInput": "${tool_input}",
+              "toolResponse": "${tool_response}"
+            },
+            "timeout": 5,
+            "statusMessage": "检查 LSP 诊断"
+          }
+        ],
+        "matcher": "^(apply_patch|Bash)$"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "codex-lsp",
+            "tool": "diagnostics_before_stop",
+            "input": {
+              "sessionId": "${session_id}",
+              "turnId": "${turn_id}",
+              "cwd": "${cwd}",
+              "stopHookActive": "${stop_hook_active}"
+            },
+            "timeout": 5,
+            "statusMessage": "检查 LSP 诊断"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "codex-lsp",
+            "tool": "diagnostics_before_subagent_stop",
+            "input": {
+              "sessionId": "${session_id}",
+              "turnId": "${turn_id}",
+              "cwd": "${cwd}",
+              "stopHookActive": "${stop_hook_active}",
+              "agentId": "${agent_id}",
+              "agentType": "${agent_type}"
+            },
+            "timeout": 5,
+            "statusMessage": "检查 LSP 诊断"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "codex-lsp",
+            "tool": "diagnostics_on_prompt",
+            "input": {
+              "sessionId": "${session_id}",
+              "turnId": "${turn_id}",
+              "cwd": "${cwd}"
+            },
+            "timeout": 5,
+            "statusMessage": "检查 LSP 诊断"
+          }
+        ]
+      }
+    ]
+  }
+}

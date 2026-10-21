@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
+import { McpHarness } from "./mcp-harness.ts";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -42,24 +42,10 @@ test(
       ["plugins/codex-lsp/dist/cli.js", "serve", "--data-root", data],
       { stdio: ["pipe", "pipe", "pipe"] },
     );
-    child.stderr.resume();
-    let sequence = 0;
+    const harness = new McpHarness(child);
     let lsPid: number | undefined;
-    const pending = new Map<number, (value: any) => void>();
-    const lines = createInterface({ input: child.stdout });
-    lines.on("line", (line) => {
-      const value = JSON.parse(line);
-      pending.get(value.id)?.(value);
-      pending.delete(value.id);
-    });
-    const request = (method: string, params: unknown) => {
-      const id = ++sequence;
-      const result = new Promise<any>((resolve) => pending.set(id, resolve));
-      child.stdin.write(
-        JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n",
-      );
-      return result;
-    };
+    const request = (method: string, params: unknown) =>
+      harness.request(method, params, AbortSignal.timeout(12000));
     try {
       await request("initialize", {
         protocolVersion: "2024-11-05",
@@ -82,7 +68,7 @@ test(
         .filter(Boolean)
         .map((line) => JSON.parse(line));
       lsPid = events[0].pid;
-      const exit = new Promise((resolve) => child.once("exit", resolve));
+      const exit = harness.exit;
       child.kill("SIGKILL");
       await exit;
       let alive = true;
@@ -99,6 +85,7 @@ test(
       assert.equal(alive, false, "LS不能只依靠自己配合EOF退出。");
     } finally {
       child.kill("SIGKILL");
+      await harness.close(AbortSignal.timeout(3000));
       if (lsPid) {
         try {
           process.kill(lsPid, "SIGKILL");

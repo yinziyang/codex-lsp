@@ -141,3 +141,20 @@ test("同方法多项动态注册按id注销，剩余过滤器不能丢失", asy
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("原生PowerShell环境清除父宿主模块路径但保留其他变量", async () => {
+  const { nativePowerShellEnvironment } = await import(
+    "../extensions/pi-lsp/process.ts"
+  );
+  const original = {
+    PSModulePath: "PowerShell7-only",
+    psModulePath: "incompatible",
+    PATH: "tools",
+    MARKER: "keep",
+  };
+  assert.deepEqual(nativePowerShellEnvironment(original), {
+    PATH: "tools",
+    MARKER: "keep",
+  });
+  assert.equal(original.PSModulePath, "PowerShell7-only");
+});

@@ -13,10 +13,17 @@ import { join } from "node:path";
 /** 在单独的进程组里启动服务器，三个标准流都走管道。 */
 const starts = new WeakMap<ChildProcessWithoutNullStreams, string>();
 
+/** PowerShell 7父进程的模块路径会污染Windows PowerShell 5，原生子进程须自行生成系统模块路径。 */
+export function nativePowerShellEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const clean = { ...env };
+  for (const key of Object.keys(clean)) if (key.toLowerCase() === "psmodulepath") delete clean[key];
+  return clean;
+}
+
 /** 原生 Windows 创建时间用于终止前核验 PID 归属，失败时拒绝盲杀。 */
 function windowsStart(pid: number): string {
 	if (!Number.isSafeInteger(pid) || pid < 1) return "";
-	try { return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`], { encoding: "utf8", timeout: 2000, windowsHide: true }).trim(); } catch { return ""; }
+	try { return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`], { encoding: "utf8", timeout: 2000, windowsHide: true, env: nativePowerShellEnvironment(process.env) }).trim(); } catch { return ""; }
 }
 
 /** 按平台启动服务器，管道断开是宿主强杀时的基础退出路径。 */

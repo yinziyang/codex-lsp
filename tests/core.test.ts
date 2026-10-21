@@ -27,6 +27,8 @@ async function setup(
   await fs.writeFile(join(root, "main.ts"), "const example = 1;\n");
   const log = join(root, "wire.jsonl");
   const actual = typeof script === "function" ? script(root) : script;
+  const scriptFile = join(root, "fake-script.json");
+  await fs.writeFile(scriptFile, JSON.stringify({ log, ...actual }));
   let count = 0;
   const core = new Core({
     dataRoot: join(root, "data"),
@@ -43,7 +45,7 @@ async function setup(
       typescript: {
         command: process.execPath,
         args: [fake],
-        env: { FAKE_LSP: JSON.stringify({ log, ...actual }) },
+        env: { FAKE_LSP_FILE: scriptFile },
       },
     }),
     toolDirectories: () => [],

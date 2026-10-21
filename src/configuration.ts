@@ -1,3 +1,4 @@
+import { nativePowerShellEnvironment } from "../extensions/pi-lsp/process.ts";
 import { validateServers } from "./server-configuration.ts";
 import { createHash } from "node:crypto";
 import { target } from "./servers.ts";
@@ -92,7 +93,13 @@ export async function secureRoot(
         Buffer.from(script, "utf16le").toString("base64"),
       ],
       signal,
-      { timeout: 5000, env: { ...process.env, CODEX_LSP_ACL_PATH: root } },
+      {
+        timeout: 5000,
+        env: {
+          ...nativePowerShellEnvironment(process.env),
+          CODEX_LSP_ACL_PATH: root,
+        },
+      },
     );
   } else {
     const st = await fs.lstat(root);

@@ -1,8 +1,8 @@
 {
-  "version": "0.1.0",
-  "sourceHash": "80b0ddc910537b777855c8b0cfda92005fa9f8e4906b5532de9f95b595e9aa16",
-  "buildHash": "16309ce065cf9289708f404e5fed4b9c9e6c39eb9398c32d0656fb5c0cd47ede",
-  "guardHash": "056bc1cac84da765a6692fc3e8a89d79793057eb0f2c6f9361401e524aea85ca",
+  "version": "0.1.1",
+  "sourceHash": "7aa60ebfa874a208063ab4a798fb33a361e16563992bb1e2d33a120b2ce2b698",
+  "buildHash": "f6058892236671a7d8d9649ef4faa50e880d89428d6a9914ff67234cf4015f25",
+  "guardHash": "43dd7d063b55c9d92b888c3bf5fdda3039549558e58dfc01133dc7c76b78e633",
   "upstream": "ff1004afc819c6f39d217949784c712c0e68ca0e",
   "codex": "83086188ae0614bd882818ff1aa23f3194962012",
   "format": "official-legacy-plugin"

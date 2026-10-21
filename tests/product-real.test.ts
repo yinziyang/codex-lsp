@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
+import { McpHarness } from "./mcp-harness.ts";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,37 +38,9 @@ test(
         env: { ...process.env, CODEX_LSP_TRACE: "1" },
       },
     );
-    let error = "";
-    child.stderr.on("data", (v) => {
-      error += v;
-    });
-    const pending = new Map<number, (x: any) => void>();
-    let sequence = 0;
-    const messages: any[] = [];
-    const lines = createInterface({ input: child.stdout });
-    lines.on("line", (line) => {
-      const x = JSON.parse(line);
-      messages.push(x);
-      pending.get(x.id)?.(x);
-      pending.delete(x.id);
-    });
-    const call = async (method: string, params: unknown = {}) => {
-      const id = ++sequence;
-      const result = new Promise<any>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pending.delete(id);
-          reject(new Error("MCP request timeout " + error));
-        }, 12000);
-        pending.set(id, (x) => {
-          clearTimeout(timer);
-          resolve(x);
-        });
-      });
-      child.stdin.write(
-        JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n",
-      );
-      return result;
-    };
+    const harness = new McpHarness(child);
+    const call = (method: string, params: unknown = {}) =>
+      harness.request(method, params, AbortSignal.timeout(12000));
     const tool = async (name: string, args: unknown) => {
       const x = await call("tools/call", {
         name,
@@ -163,14 +135,8 @@ test(
         } catch {}
       }
     } finally {
-      const exited = new Promise<number | null>((resolve) =>
-        child.once("exit", resolve),
-      );
-      child.stdin.end();
-      const timer = setTimeout(() => child.kill("SIGKILL"), 10000);
-      const code = await exited;
-      clearTimeout(timer);
-      assert.equal(code, 0, error);
+      const code = await harness.close(AbortSignal.timeout(10000));
+      assert.equal(code, 0);
       await fs.rm(root, { recursive: true, force: true });
     }
   },

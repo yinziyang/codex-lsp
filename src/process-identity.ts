@@ -1,3 +1,4 @@
+import { nativePowerShellEnvironment } from "../extensions/pi-lsp/process.ts";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 /** PID 只用于查询，创建身份用于区分复用后的无关进程，不输出命令参数。 */
@@ -35,7 +36,12 @@ export async function inspectProcess(
           timeout: 2000,
           windowsHide: true,
           encoding: "utf8",
-          env: { ...process.env, LC_ALL: "C" },
+          env: {
+            ...(process.platform === "win32"
+              ? nativePowerShellEnvironment(process.env)
+              : process.env),
+            LC_ALL: "C",
+          },
         },
         (error, stdout) => (error ? reject(error) : resolve(stdout.trim())),
       ),

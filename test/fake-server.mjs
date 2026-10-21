@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 可编剧本的假语言服务器，供单元测试以真实子进程的方式驱动 pi-lsp。
-// 剧本是 JSON，放在环境变量 FAKE_LSP；收到的每条消息与关键事件按行写到剧本里的 log 文件，测试据此断言。
+// 剧本是 JSON，放在环境变量 FAKE_LSP 或 FAKE_LSP_FILE 指定的文件；收到的每条消息与关键事件按行写到剧本里的 log 文件，测试据此断言。
 //
 // 剧本字段（都可选）：
 //   log                 事件日志路径（JSONL）
@@ -27,9 +27,9 @@
 //   warmup              {ms, responses}：initialized 之后 ms 毫秒内，按 warmup.responses 回复（模拟服务器还在加载工程时返回的不完整结果）
 
 import { spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 
-const S = JSON.parse(process.env.FAKE_LSP || "{}");
+const S = JSON.parse(process.env.FAKE_LSP_FILE ? readFileSync(process.env.FAKE_LSP_FILE, "utf8") : (process.env.FAKE_LSP || "{}"));
 const log = (o) => { if (S.log) appendFileSync(S.log, JSON.stringify({ t: Date.now(), pid: process.pid, ...o }) + "\n"); };
 const docs = new Map();
 const cmCount = {};

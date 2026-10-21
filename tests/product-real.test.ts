@@ -40,8 +40,20 @@ test(
       },
     );
     const harness = new McpHarness(child);
-    const call = (method: string, params: unknown = {}) =>
-      harness.request(method, params, AbortSignal.timeout(12000));
+    const call = async (method: string, params: unknown = {}) => {
+      try {
+        return await harness.request(
+          method,
+          params,
+          AbortSignal.timeout(12000),
+        );
+      } catch (error) {
+        throw new Error(
+          `真实clangd请求失败：${method} ${JSON.stringify(params)}`,
+          { cause: error },
+        );
+      }
+    };
     const tool = async (name: string, args: unknown) => {
       const x = await call("tools/call", {
         name,
@@ -136,6 +148,18 @@ test(
         } catch {}
       }
     } finally {
+      // 失败也保存协议，保留定位启动与语义阶段所需证据，不放宽原超时和断言。
+      if (process.env.CODEX_LSP_EVIDENCE) {
+        await fs.mkdir(process.env.CODEX_LSP_EVIDENCE, { recursive: true });
+        try {
+          await fs.copyFile(
+            join(data, "logs", "protocol.jsonl"),
+            join(process.env.CODEX_LSP_EVIDENCE, "real-product-protocol.jsonl"),
+          );
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
       const leases = (await fs.readdir(join(data, "runtime", "guards"))).filter(
         (name) => name.endsWith(".json"),
       );

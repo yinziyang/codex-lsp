@@ -35,7 +35,21 @@ const cases = [
   ["css", "web", "main.css", "color"],
 ];
 const matrix = [];
+let tscVersion;
+try {
+  tscVersion = execFileSync("tsc", ["--version"], {
+    encoding: "utf8",
+    timeout: 10000,
+  }).trim();
+} catch {}
+if (Number(tscVersion?.match(/Version (\d+)/)?.[1]) >= 7)
+  cases.push(["tsc LSP", "typescript", "main.ts", "doubleValue", "double"]);
 for (const [server, directory, file, symbol, implementation] of cases) {
+  if (
+    process.env.CODEX_LSP_MATRIX_SERVER &&
+    server !== process.env.CODEX_LSP_MATRIX_SERVER
+  )
+    continue;
   const workspace = await fs.realpath(
     join(repository, "fixtures", "semantics", directory),
   );
@@ -46,7 +60,10 @@ for (const [server, directory, file, symbol, implementation] of cases) {
     JSON.stringify({
       schemaVersion: 1,
       authorizedWorkspaces: [workspace],
-      servers: {},
+      servers:
+        server === "tsc LSP"
+          ? { typescript: { command: "tsc", args: ["--lsp", "--stdio"] } }
+          : {},
     }),
   );
   const text = await fs.readFile(join(workspace, file), "utf8");
@@ -213,6 +230,13 @@ for (const [server, directory, file, symbol, implementation] of cases) {
       );
     matrix.push({
       server,
+      ...(server === "tsc LSP"
+        ? {
+            executableVersion: tscVersion,
+            command: "tsc",
+            args: ["--lsp", "--stdio"],
+          }
+        : {}),
       platform: process.platform,
       node: process.version,
       build: JSON.parse(
@@ -237,17 +261,18 @@ for (const [server, directory, file, symbol, implementation] of cases) {
     );
   }
 }
-matrix.push({
-  server: "tsc LSP",
-  platform: process.platform,
-  status: "NotTested",
-  reason:
-    "本机未发现可验证的 TypeScript >=7 LSP 入口，不把 typescript-language-server 冒充该路径。",
-  operations: operations.map((operation) => ({
-    operation,
+if (!cases.some(([server]) => server === "tsc LSP"))
+  matrix.push({
+    server: "tsc LSP",
+    platform: process.platform,
     status: "NotTested",
-  })),
-});
+    reason:
+      "本机未发现可验证的 TypeScript >=7 LSP 入口，不把 typescript-language-server 冒充该路径。",
+    operations: operations.map((operation) => ({
+      operation,
+      status: "NotTested",
+    })),
+  });
 await fs.writeFile(
   join(output, "real-server-matrix.json"),
   JSON.stringify(matrix, null, 2) + "\n",

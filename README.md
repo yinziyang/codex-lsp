@@ -123,3 +123,17 @@ Pi 入口为 `src/pi.ts`，通过同一 Core 提供工具、事件、状态、re
 原 `extensions/pi-lsp/index.ts` 保留上游参考和回归，不是当前包的生产入口。
 Pi 真实 Agent 尚需独立宿主验收。
 架构与复用边界见 [模块边界](docs/模块边界.md)。
+
+## 指定Server重启。
+
+```sh
+node plugins/codex-lsp/dist/cli.js restart clangd --instance INSTANCE_ID --workspace /absolute/project
+node plugins/codex-lsp/dist/cli.js restart ts --instance INSTANCE_ID --workspace /absolute/project
+```
+
+指定Server或语言别名时，范围为目标Core、显式工作区内该Server的全部项目根。
+例如ts统一为typescript，同工作区两个TS项目根均重启，clangd及另一个Core不变。
+省略Server保留原全工作区重启行为。
+未知Server、多余定位参数、重复标志或不属于目标Core的工作区均明确失败，不能退化成全部重启。
+只失效被重启实例的调用层级项与语义详情缓存。
+协议1旧连接不支持Server定位，需新启动插件连接，详见 [控制协议](docs/控制协议.md)。

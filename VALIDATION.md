@@ -131,3 +131,35 @@ GitHub hosted runner 的测试只证明实际执行的用例，不等于带账�
 移除命令为 `codex plugin remove codex-lsp@codex-lsp-local`。
 清理市场命令为 `codex plugin marketplace remove codex-lsp-local`。
 恢复时仅恢复本插件条目、其市场及已验证缓存，不覆盖其他会话新增的用户配置。
+
+## F01指定Server重启回归。
+
+使用0.1.4构建后执行 `node scripts/restart-validation.mjs`，可用CODEX_LSP_EVIDENCE指定独立证据目录。
+脚本启动两个真实Core，每个Core包含clangd和两个独立项目根的TypeScript服务器。
+
+1. `restart clangd --instance <A> --workspace <根>`只改变A中clangd的PID与代次。
+2. `restart ts --instance <A> --workspace <根>`改变A中两个TS项目根，clangd和Core B保持。
+3. 省略Server则重启A中该工作区全部Server，Core B仍保持。
+4. 无效Server、重复定位标志、多个Server、未知参数、错误实例和错误工作区必须失败，前后状态完全不变。
+5. 检查旧调用项与详情只在所属实例重启后Stale，其他Server和Core仍可使用。
+6. 协议1旧Core收到Server定位意图须Unsupported，不能忽略定位字段执行全工作区重启。
+
+自动化 `tests/restart.test.ts` 使用可控协议与真实子进程补充缓存、协议身份和无效目标断言，不冒充真实语言服务器。
+0.1.4控制协议与版本边界见 `docs/控制协议.md`。
+
+## 原生子线程开发探针。
+
+`node scripts/native-thread-probe.mjs`要求CODEX_LSP_PLUGIN_CLI显式指向已安装插件CLI，不从源码目录冒充安装。
+CODEX_LSP_EVIDENCE指定自有夹具和证据目录，CODEX_LSP_NATIVE_MODE可为v1或v2。
+仅在被测Codex本次命令内启用原生工具，配置不写入用户全局文件。
+必须保存实际工具表搜索、原生ThreadSpawn子threadId、成功文件编辑和SubagentStop协议记录。
+模型自述已使用原生工具、/root任务路径或合成代理结果都不足以证明通过。
+原生工具不可发现时保留源码、CLI功能与实际搜索证据，不能改用合成代理宣布成功。
+
+CODEX_LSP_NATIVE_MODE=v2使用features.multi_agent_v2结构配置及non_code_mode_only=true，工具直接暴露给模型，不能用根multi_agent_v2字段替代。
+探针thread-evidence.json分别记录nativeThreadSpawnObserved及subagentStopObserved，前者为真不代表后者通过。
+子线程继承MCP工具可见性与执行Hook是不同条件，须按子threadId核对实际调用日志。
+
+TypeScript 7本机补证可运行 `CODEX_LSP_MATRIX_SERVER="tsc LSP" CODEX_LSP_EVIDENCE=<新目录> node scripts/real-matrix.mjs`，再用相同证据目录运行 `node scripts/verify-matrix.mjs`。
+脚本仅在tsc报告主版本至少7时添加该路径，并通过明确tsc命令及--lsp、--stdio参数与TS5入口区分。
+固定版本、可执行文件来源和摘要仍须单独保存，不只凭initialize版本自报判断成功。

@@ -22,3 +22,9 @@ description: 通过包内 CLI 与可审阅计划管理语言服务器及插件�
 Plugin 更新用同一标识重新 add，保存旧包、配置与启禁状态，不能编造 plugin update 或 enable 子命令。
 更新 Hook 后重新审阅，安装后启动新进程核对版本与构建哈希。
 直接移除后需要恢复同版本包或使用同版本发行包内离线 CLI 执行清理。
+
+指定Server使用 `restart clangd --instance <ID> --workspace <绝对路径>`，也可用c、ts、go等现有语言别名。
+选择范围为该Core和工作区内同Server的全部项目根，不影响其他Server或Core。
+省略Server明确表示全工作区重启。
+只能给一个可选Server，未知目标或剩余参数必须报告失败，不以省略参数重试成全部重启。
+协议1旧Core不支持指定Server时应提示新启动插件连接，不能将更新的CLI当作旧Core已升级。

@@ -1,4 +1,5 @@
 import { configuredServers } from "./server-configuration.ts";
+import { target } from "./servers.ts";
 import { fileNotifications } from "./file-events.ts";
 import { SemanticQueries } from "./semantic.ts";
 import type { Instance, Workspace } from "./state.ts";
@@ -544,29 +545,38 @@ export class Core {
     return this.semantics.detail(thread, id, offset);
   }
 
-  /** 仅重启明确工作区实例，不从新的 manager 猜测其他进程归属。 */
-  async restart(root: string, signal: AbortSignal): Promise<void> {
+  /** 在当前Core的明确工作区重启指定Server的全部项目根，省略Server保留整工作区行为。 */
+  async restart(
+    root: string,
+    signal: AbortSignal,
+    server?: string,
+  ): Promise<void> {
+    const selectedServer = server === undefined ? undefined : target(server);
     const actual = (await workspacePath(root, undefined, signal)).root;
     const instances = [...this.instances.values()].filter(
-      (i) => i.workspace === actual,
+      (i) =>
+        i.workspace === actual &&
+        (selectedServer === undefined || i.server.name === selectedServer),
     );
     if (!instances.length)
-      throw new Error("StaleInstance：目标工作区没有活动实例。");
-    for (const i of instances) {
-      check(signal);
-      if (!i.restarting)
-        i.restarting = (async () => {
-          if (i.starting) await i.starting.catch(() => {});
-          await i.client.stop();
-          this.expire(i);
-          i.failures = 0;
-          i.lastCrash = 0;
-        })().finally(() => {
-          i.restarting = undefined;
-        });
-      await this.abortable(i.restarting, signal);
-    }
-    for (const i of instances) await this.running(i, signal);
+      throw new Error("StaleInstance：目标工作区或Server没有可重启实例。");
+    await Promise.all(
+      instances.map(async (i) => {
+        check(signal);
+        if (!i.restarting)
+          i.restarting = (async () => {
+            if (i.starting) await i.starting.catch(() => {});
+            await i.client.stop();
+            this.expire(i);
+            i.failures = 0;
+            i.lastCrash = 0;
+          })().finally(() => {
+            i.restarting = undefined;
+          });
+        await this.abortable(i.restarting, signal);
+      }),
+    );
+    await Promise.all(instances.map((i) => this.running(i, signal)));
     this.workspaces.get(actual)!.index.watch.dirty = true;
   }
   /** 停止监听和在途等待，所有 LS 并行有界关闭，重复调用安全。 */

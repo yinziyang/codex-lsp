@@ -44,7 +44,8 @@ const explicitRoot = option("data-root");
 const root = explicitRoot
   ? resolve(explicitRoot)
   : dataRoot(process.env, process.platform);
-const workspace = resolve(option("workspace") ?? process.cwd());
+const explicitWorkspace = option("workspace");
+const workspace = resolve(explicitWorkspace ?? process.cwd());
 const command = args.shift() ?? "help";
 const lifetime = new AbortController();
 const stop = () => lifetime.abort(new Error("收到终止信号。"));
@@ -94,7 +95,7 @@ async function main(): Promise<void> {
         "install-asset rust --url <官方gz> --sha256 <校验> --version <固定版本>",
         "authorize --workspace <绝对路径>",
         "configure <语言> --json <对象>",
-        "restart --instance <ID> --workspace <绝对路径>",
+        "restart [Server或语言别名] --instance <ID> --workspace <绝对路径>，省略Server重启该工作区全部Server及项目根",
         "uninstall <语言>",
         "purge",
         "instances",
@@ -278,14 +279,22 @@ async function main(): Promise<void> {
   }
   if (command === "instances" || command === "restart") {
     const instanceId = option("instance");
-    if (command === "restart" && !instanceId)
-      throw new Error("重启必须显式提供 --instance。");
+    if (command === "restart" && (!instanceId || !explicitWorkspace))
+      throw new Error("重启必须显式提供 --instance 和 --workspace。");
+    if (
+      args.length > (command === "restart" ? 1 : 0) ||
+      args.some((value) => value.startsWith("--")) ||
+      (command === "instances" && instanceId)
+    )
+      throw new Error("InvalidInput：未知、重复或冲突的定位参数。");
+    const server =
+      command === "restart" && args.length ? target(args[0]) : undefined;
     const list = await runtimes(root, signal);
     if (command === "restart") {
       const selected = list.filter((x) => x.instanceId === instanceId);
       if (selected.length !== 1)
         throw new Error("StaleInstance：目标不唯一或已失效。");
-      print(await control(selected[0], "restart", workspace, signal));
+      print(await control(selected[0], "restart", workspace, signal, server));
     } else {
       const result = [];
       for (const record of list) {

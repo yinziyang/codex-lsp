@@ -1,4 +1,5 @@
 import { inspectProcess } from "./process-identity.ts";
+import { target } from "./servers.ts";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { randomUUID, createHash, timingSafeEqual } from "node:crypto";
@@ -12,7 +13,7 @@ export interface RuntimeRecord {
   pid: number;
   started: string;
   processIdentity: string;
-  protocolVersion: 1;
+  protocolVersion: 1 | 2;
   endpoint: string;
   token: string;
   workspaces: string[];
@@ -47,7 +48,7 @@ export async function runtimes(
     const x = (await readJson(path, null, signal)) as RuntimeRecord;
     if (
       x &&
-      x.protocolVersion === 1 &&
+      (x.protocolVersion === 1 || x.protocolVersion === 2) &&
       typeof x.token === "string" &&
       /^[a-f0-9]{64}$/.test(x.token) &&
       /^http:\/\/127\.0\.0\.1:\d+$/.test(x.endpoint) &&
@@ -67,7 +68,19 @@ export async function control(
   action: "status" | "restart",
   workspace: string | undefined,
   signal: AbortSignal,
+  server?: string,
 ): Promise<unknown> {
+  const selectedServer = server === undefined ? undefined : target(server);
+  if (
+    action === "restart" &&
+    selectedServer !== undefined &&
+    record.protocolVersion !== 2
+  )
+    throw new Error(
+      "Unsupported：旧Core控制协议不支持Server定位，请新启动插件连接。",
+    );
+  if (action === "status" && selectedServer !== undefined)
+    throw new Error("InvalidInput：status不接受Server选择。");
   const processState = await inspectProcess(record.pid, signal);
   if (
     processState.state !== "alive" ||
@@ -82,13 +95,24 @@ export async function control(
     },
     body: JSON.stringify({
       id: randomUUID(),
+      ...(record.protocolVersion === 2 ? { protocolVersion: 2 } : {}),
       instanceId: record.instanceId,
       action,
       workspace,
+      server: selectedServer,
     }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
   });
-  if (!response.ok) throw new Error("StaleInstance：目标失效或拒绝请求。");
+  if (!response.ok) {
+    const error = (await response.json().catch(() => ({}))) as {
+      error?: unknown;
+    };
+    throw new Error(
+      typeof error.error === "string"
+        ? "StaleInstance：目标失效或拒绝请求：" + error.error.slice(0, 2000)
+        : "StaleInstance：目标失效或拒绝请求。",
+    );
+  }
   return response.json();
 }
 
@@ -132,25 +156,46 @@ export async function startControl(
       }
       const input = JSON.parse(body);
       if (
+        !input ||
+        typeof input !== "object" ||
+        Array.isArray(input) ||
+        Object.keys(input).some(
+          (key) =>
+            ![
+              "id",
+              "instanceId",
+              "action",
+              "workspace",
+              "server",
+              "protocolVersion",
+            ].includes(key),
+        ) ||
         input.instanceId !== instanceId ||
+        input.protocolVersion !== 2 ||
         typeof input.id !== "string" ||
         !["status", "restart"].includes(input.action)
       )
         throw new Error("InvalidInput");
       if (input.action === "restart") {
-        if (typeof input.workspace !== "string")
+        if (
+          typeof input.workspace !== "string" ||
+          (input.server !== undefined && typeof input.server !== "string")
+        )
           throw new Error("InvalidInput");
         await core.restart(
           input.workspace,
           AbortSignal.any([controller.signal, AbortSignal.timeout(4000)]),
+          input.server,
         );
-      }
+      } else if (input.workspace !== undefined || input.server !== undefined)
+        throw new Error("InvalidInput：status不接受工作区或Server选择。");
       response.setHeader("content-type", "application/json");
       response.end(
         JSON.stringify({
           instanceId,
           pid: process.pid,
           started,
+          protocolVersion: 2,
           instances: core.status(),
         }),
       );
@@ -174,7 +219,7 @@ export async function startControl(
     pid: process.pid,
     started,
     processIdentity,
-    protocolVersion: 1,
+    protocolVersion: 2,
     endpoint,
     token,
     workspaces: [],

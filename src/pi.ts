@@ -203,16 +203,18 @@ export default function piAdapter(pi: ExtensionAPI): void {
     },
   });
   pi.registerCommand("lsp", {
-    description: "LSP 状态、安装与重启。",
+    description: "LSP 状态、安装与restart [Server或语言别名]重启。",
     getArgumentCompletions: (prefix) =>
       ["install", "restart"]
         .filter((value) => value.startsWith(prefix))
         .map((value) => ({ value, label: value })),
     handler: async (args, ctx) => {
-      const [action, language] = args.trim().split(/\s+/);
+      const [action, language, ...remaining] = args.trim().split(/\s+/);
       if (!core) return ctx.ui.notify("LSP 尚未初始化。", "warning");
       if (action === "restart") {
-        await core.restart(ctx.cwd, AbortSignal.timeout(10000));
+        if (remaining.length)
+          throw new Error("InvalidInput：restart只接受一个Server或语言别名。");
+        await core.restart(ctx.cwd, AbortSignal.timeout(10000), language);
         status();
         return;
       }

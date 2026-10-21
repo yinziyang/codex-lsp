@@ -578,9 +578,21 @@ export class Core {
       await Promise.allSettled(
         [...this.workspaces.values()].map((w) => w.reconciling),
       );
-      await Promise.allSettled(
+      const stopped = await Promise.allSettled(
         [...this.instances.values()].map((i) => i.client.stop()),
       );
+      const failures = stopped.filter(
+        (value): value is PromiseRejectedResult => value.status === "rejected",
+      );
+      if (failures.length)
+        throw new AggregateError(
+          failures.map((value) => value.reason),
+          "LS停止失败，保留租约并核实残留：" +
+            failures
+              .map((value) => String(value.reason))
+              .join("，")
+              .slice(0, 2000),
+        );
     })());
   }
 }

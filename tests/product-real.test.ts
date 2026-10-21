@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { McpHarness } from "./mcp-harness.ts";
+import { waitUntil } from "../test/fixtures.ts";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -135,9 +136,53 @@ test(
         } catch {}
       }
     } finally {
+      const leases = (await fs.readdir(join(data, "runtime", "guards"))).filter(
+        (name) => name.endsWith(".json"),
+      );
+      const ownedPids: number[] = [];
+      for (const name of leases) {
+        const lease = JSON.parse(
+          await fs.readFile(join(data, "runtime", "guards", name), "utf8"),
+        );
+        for (const pid of [lease.guardPid, lease.childPid]) {
+          assert.ok(Number.isSafeInteger(pid) && pid > 0);
+          ownedPids.push(pid);
+        }
+      }
+      assert.ok(ownedPids.length >= 2, "真实LS必须有可核对的独占守护租约。");
+      const closeStarted = Date.now();
       const code = await harness.close(AbortSignal.timeout(10000));
       assert.equal(code, 0);
-      await fs.rm(root, { recursive: true, force: true });
+      assert.ok(
+        await waitUntil(
+          () =>
+            ownedPids.every((pid) => {
+              try {
+                process.kill(pid, 0);
+                return false;
+              } catch {
+                return true;
+              }
+            }),
+          5000,
+        ),
+        "EOF后LS和守护必须确实退出。",
+      );
+      console.info(
+        "真实EOF进程收尾",
+        JSON.stringify({
+          platform: process.platform,
+          ownedPids,
+          mcpExit: code,
+          closeElapsedMs: Date.now() - closeStarted,
+        }),
+      );
+      await fs.rm(root, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
     }
   },
 );

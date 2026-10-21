@@ -32,16 +32,20 @@ async function setup(
   await fs.writeFile(scriptFile, JSON.stringify({ log, ...actual }));
   let count = 0;
   const events: any[] = [];
+  const clients: LspClient[] = [];
   const core = new Core({
     dataRoot: join(root, "data"),
     env: process.env,
     now: () => Date.now(),
     identity: () => `item-${++count}`,
-    createClient: (options) =>
-      new LspClient({
+    createClient: (options) => {
+      const client = new LspClient({
         ...options,
         readiness: { minMs: 0, quietMs: 0, maxMs: 0 },
-      }),
+      });
+      clients.push(client);
+      return client;
+    },
     authorized: async () => true,
     serverOverrides: () => ({
       typescript: {
@@ -76,6 +80,7 @@ async function setup(
     core,
     query,
     events,
+    clients,
     close: async () => {
       await core.close();
       await fs.rm(root, { recursive: true, force: true });
@@ -355,5 +360,22 @@ test("项目配置需内容摘要信任，改动立即失效，用户禁用上�
     );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Core关闭必须传播LS停止失败并保留原始原因", async () => {
+  const s = await setup();
+  await s.query("hover");
+  const client = s.clients[0];
+  const stop = client.stop.bind(client);
+  client.stop = async () => {
+    throw new Error("停止依赖失败标记");
+  };
+  try {
+    await assert.rejects(s.core.close(), /LS停止失败.*停止依赖失败标记/);
+  } finally {
+    client.stop = stop;
+    await stop();
+    await fs.rm(s.root, { recursive: true, force: true });
   }
 });

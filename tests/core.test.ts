@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Core } from "../src/core.ts";
 import { LspClient } from "../extensions/pi-lsp/client.ts";
 import { CodexAdapter } from "../src/mcp.ts";
+import { waitUntil } from "../test/fixtures.ts";
 import { startControl, runtimes, control } from "../src/runtime.ts";
 import {
   configuration,
@@ -30,6 +31,7 @@ async function setup(
   const scriptFile = join(root, "fake-script.json");
   await fs.writeFile(scriptFile, JSON.stringify({ log, ...actual }));
   let count = 0;
+  const events: any[] = [];
   const core = new Core({
     dataRoot: join(root, "data"),
     env: process.env,
@@ -49,6 +51,7 @@ async function setup(
       },
     }),
     toolDirectories: () => [],
+    trace: (event) => events.push(event),
   });
   const query = (
     operation: string,
@@ -72,6 +75,7 @@ async function setup(
     log,
     core,
     query,
+    events,
     close: async () => {
       await core.close();
       await fs.rm(root, { recursive: true, force: true });
@@ -253,6 +257,12 @@ test("无版本Push反馈观察但不确认修复，等待可取消", async () =
   try {
     s.core.ledger.context("t", "session");
     await fs.writeFile(join(s.root, "main.ts"), "ERROR\n");
+    await s.query("hover", { character: 1 });
+    assert.ok(
+      await waitUntil(() =>
+        s.events.some((event) => event.event === "publishDiagnostics"),
+      ),
+    );
     await assert.rejects(s.core.reconcile(s.root, AbortSignal.timeout(300)));
     const output = s.core.ledger.collect("t", s.root, "event");
     assert.match(output, /current-diagnostics/);

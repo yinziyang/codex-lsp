@@ -22,8 +22,13 @@ import { fileUri } from "./uri.ts";
 /** 可选原始线级证据只在调用方显式开启时记录，普通运行不采集项目内容。 */
 class EvidenceWriter extends StreamMessageWriter {
  private observe:((event:unknown)=>void)|undefined;
- constructor(stream:Writable,observe?: (event:unknown)=>void){super(stream);this.observe=observe;}
- override write(message:Message):Promise<void>{this.observe?.({event:"lsp-wire",direction:"send",message});return super.write(message);}
+ private onFailure:(error:Error)=>void;
+ constructor(stream:Writable,onFailure:(error:Error)=>void,observe?: (event:unknown)=>void){super(stream);this.observe=observe;this.onFailure=onFailure;}
+ /** JSONRPC9在异步Promise执行器中重复抛写错误，改由连接失效拒绝在途请求，不能把失败记成已送达。 */
+ override async write(message:Message):Promise<void>{
+  this.observe?.({event:"lsp-wire",direction:"send",message});
+  try {await super.write(message);} catch(error){this.onFailure(error instanceof Error?error:new Error(String(error)));}
+ }
 }
 
 export type ClientState = "stopped" | "starting" | "running" | "stopping" | "error";
@@ -245,7 +250,7 @@ export class LspClient {
 		if (child.pid !== undefined) o.registry?.add(child.pid);
 
 		const reader = new GuardedMessageReader(child.stdout,message=>o.trace?.({event:"lsp-wire",direction:"receive",message}));
-		const conn = createMessageConnection(reader, new EvidenceWriter(child.stdin,o.trace));
+		const conn = createMessageConnection(reader, new EvidenceWriter(child.stdin,error=>{this.fail(error);this.conn?.dispose();},o.trace));
 		this.conn = conn;
 		this.installHandlers(conn);
 		conn.onError(([err]) => this.fail(err instanceof Error ? err : new Error(String(err))));
@@ -265,6 +270,7 @@ export class LspClient {
 			if (this.capabilities.positionEncoding && this.capabilities.positionEncoding !== "utf-16") throw new Error("Unsupported：服务器协商了未声明的位置编码。");
 			await conn.sendNotification("initialized", {});
 			if (o.settings !== undefined) await conn.sendNotification("workspace/didChangeConfiguration", { settings: o.settings });
+			if (this.state !== "starting") throw this.lastError ?? new Error("LSP初始化写入失败");
 			this.runningAt = Date.now();
 			this.setState("running");
 		} catch (e) {
@@ -372,6 +378,7 @@ export class LspClient {
 		this.lastError = err;
 		const wasRunning = this.state === "running";
 		this.setState("error");
+		this.conn?.dispose();
 		if (this.child) void forceTerminate(this.child, TERM_WAIT_MS).catch((error: Error) => { this.lastError = error; });
 		if (wasRunning) this.opts.onCrash(err);
 	}
@@ -409,7 +416,7 @@ export class LspClient {
 			const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
 			aborted.catch(() => {});
 			const onAbort = () => {
-				source.cancel();
+				if (this.state === "running" && this.conn === conn) source.cancel();
 				rejectAbort(new Error("request aborted"));
 			};
 			signal?.addEventListener("abort", onAbort, { once: true });
@@ -420,7 +427,7 @@ export class LspClient {
 				return await withTimeout(Promise.race([p, aborted]), this.opts.requestTimeout, `request timed out after ${this.opts.requestTimeout}ms`);
 			} catch (e) {
 				last = e as Error & { code?: number };
-				source.cancel();
+				if (this.state === "running" && this.conn === conn) source.cancel();
 				if (signal?.aborted) break;
 				if (last.code === CONTENT_MODIFIED && attempt < MAX_RETRIES) {
 					await sleep(RETRY_BASE_MS * 2 ** attempt,signal);

@@ -158,3 +158,42 @@ test("原生PowerShell环境清除父宿主模块路径但保留其他变量", a
   });
   assert.equal(original.PSModulePath, "PowerShell7-only");
 });
+
+test("请求写入已经关闭的管道必须传播失败且没有未处理拒绝", async () => {
+  const { spawnServer } = await import("../extensions/pi-lsp/process.ts");
+  const root = await fs.mkdtemp(join(tmpdir(), "codex-lsp-write-"));
+  let child: ReturnType<typeof spawnServer> | undefined;
+  const client = new LspClient({
+    name: "write-failure",
+    command: process.execPath,
+    args: [fake],
+    root,
+    env: { ...process.env, FAKE_LSP: JSON.stringify({ ignoreEof: true }) },
+    spawn: (command, args, cwd, env) => {
+      child = spawnServer(command, args, cwd, env);
+      return child;
+    },
+    initializationOptions: {},
+    settings: {},
+    startupTimeout: 3000,
+    requestTimeout: 1000,
+    shutdownTimeout: 200,
+    pullDiagnostics: false,
+    onDiagnostics: () => {},
+    onDiagnosticsRefresh: () => {},
+    onCrash: () => {},
+  });
+  try {
+    await client.start();
+    assert.ok(child);
+    child.stdin.end();
+    await assert.rejects(
+      client.request("test/closed-pipe", {}, AbortSignal.timeout(2000)),
+    );
+    assert.equal(client.state, "error");
+    assert.ok(client.lastError);
+  } finally {
+    await client.stop();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

@@ -44,6 +44,7 @@ test(
     );
     const harness = new McpHarness(child);
     let lsPid: number | undefined;
+    let guardPid: number | undefined;
     const request = (method: string, params: unknown) =>
       harness.request(method, params, AbortSignal.timeout(12000));
     try {
@@ -68,21 +69,35 @@ test(
         .filter(Boolean)
         .map((line) => JSON.parse(line));
       lsPid = events[0].pid;
+      const leases = await fs.readdir(join(data, "runtime", "guards"));
+      assert.equal(leases.length, 1);
+      guardPid = JSON.parse(
+        await fs.readFile(join(data, "runtime", "guards", leases[0]), "utf8"),
+      ).guardPid;
+      assert.ok(Number.isSafeInteger(lsPid) && lsPid! > 0);
+      assert.ok(Number.isSafeInteger(guardPid) && guardPid! > 0);
       const exit = harness.exit;
       child.kill("SIGKILL");
       await exit;
       let alive = true;
       const deadline = Date.now() + 5000;
       while (Date.now() < deadline) {
-        try {
-          process.kill(lsPid!, 0);
-        } catch {
-          alive = false;
-          break;
-        }
+        alive = [lsPid!, guardPid!].some((pid) => {
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        if (!alive) break;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      assert.equal(alive, false, "LS不能只依靠自己配合EOF退出。");
+      assert.equal(
+        alive,
+        false,
+        "LS和私有守护必须都退出，不能只依靠LS配合EOF。",
+      );
     } finally {
       child.kill("SIGKILL");
       await harness.close(AbortSignal.timeout(3000));
@@ -91,7 +106,12 @@ test(
           process.kill(lsPid, "SIGKILL");
         } catch {}
       }
-      await fs.rm(root, { recursive: true, force: true });
+      await fs.rm(root, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
     }
   },
 );

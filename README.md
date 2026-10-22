@@ -14,6 +14,35 @@
 前置条件为 Node >=22.18 和 Codex CLI 0.163.0。
 语言服务器使用已有工具链或本插件私有资产，不自动安装系统软件。
 
+### 从 GitHub 市场安装。
+
+首次安装可直接添加 GitHub 仓库中的插件市场，无需克隆源码或运行 npm 构建。
+
+```sh
+codex plugin marketplace add https://github.com/yinziyang/codex-lsp.git --ref main
+codex plugin add codex-lsp@codex-lsp-local
+codex plugin list --json --marketplace codex-lsp-local
+```
+
+- `codex-lsp-local` 是仓库声明的市场名称，名称中的 `local` 不表示市场来自本地目录。
+- 市场来源为 GitHub Git 仓库，Codex 下载后显示本地缓存路径。
+- `--ref` 是可选参数，可指定分支、标签或完整提交号。
+- `--ref main` 获取添加市场时的 main 分支快照，不代表后续自动更新。
+- 需要复现已验收的 0.2.0 版本时，将 `main` 替换为 `1484bd4f21a115fd18d077137158c3a8e3194908`。
+
+可用下列命令核对实际市场来源。
+
+```sh
+codex plugin marketplace list --json
+```
+
+GitHub 安装的市场应显示 `marketplaceSource.sourceType` 为 `git`，且 `marketplaceSource.source` 为上述仓库 URL。
+已有同名市场或已安装本插件时，不要重复添加市场，更新与独立验收流程见 [VALIDATION.md](VALIDATION.md)。
+
+### 从源码进行本地开发安装。
+
+在本仓库根目录执行下列命令。
+
 ```sh
 npm ci --ignore-scripts
 npm run typecheck
@@ -26,11 +55,14 @@ node dist/plugin-install.mjs
 无需开发依赖的离线清理入口为 `plugins/codex-lsp/dist/cli.js`。
 不要执行 `codex mcp add`。
 安装助手执行前会校验 CLI 和守护产物的 SHA256。
-远端安装使用 [VALIDATION.md](VALIDATION.md) 中固定 commit/ref 的 Git marketplace 流程。
+
+### 安装后首次使用。
 
 安装或更新后关闭测试 Codex，再新启动进程。
 在 `/hooks` 正式审阅五类 Hook。
 插件启用不代表 Hook 已信任，也不代表 MCP 已连接或自动反馈已被模型读取。
+在新 Codex 会话中使用本插件的 setup 技能检查语言服务器并授权项目目录。
+下列手动 CLI 示例需在源码仓库根目录执行，GitHub 市场安装可通过 setup 技能完成配置。
 
 ```sh
 node plugins/codex-lsp/dist/cli.js authorize --workspace /absolute/project

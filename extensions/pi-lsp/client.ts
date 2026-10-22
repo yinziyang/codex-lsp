@@ -243,7 +243,7 @@ export class LspClient {
 		try {
 			await spawned;
 		} catch (e) {
-			this.setState("error");
+			if ((this.state as ClientState) !== "stopping" && (this.state as ClientState) !== "stopped") this.setState("error");
 			this.lastError = e as Error;
 			throw e;
 		}
@@ -274,12 +274,14 @@ export class LspClient {
 			this.runningAt = Date.now();
 			this.setState("running");
 		} catch (e) {
+			// 主动停止初始化后不把终态改回error，真正的初始化失败仍保留错误状态。
+			const stopped = (this.state as ClientState) === "stopping" || (this.state as ClientState) === "stopped";
 			// 初始化期间进程退出时，onExit 已记下退出码与 stderr，比「连接已释放」更能说明原因，优先用它。
 			const err = (this.state as ClientState) === "error" && this.lastError ? this.lastError : (e as Error);
 			const tail = this.stderrTail.trim();
 			this.lastError = tail && !err.message.includes(tail) ? new Error(`${err.message}\n${tail}`) : err;
 			await this.stop();
-			this.setState("error");
+			if (!stopped) this.setState("error");
 			throw this.lastError;
 		}
 	}

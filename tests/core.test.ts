@@ -400,3 +400,29 @@ test("超过详情缓存上限的真实语义响应首包仍满足32000字节", 
     await s.close();
   }
 });
+
+test("预先取消和慢初始化取消统一返回Cancelled，关闭后不残留LS", async () => {
+  const s = await setup({ initDelayMs: 400 });
+  const input = {
+    operation: "hover",
+    workspaceRoot: s.root,
+    filePath: "main.ts",
+    line: 1,
+    character: 7,
+  };
+  const pids: number[] = [];
+  try {
+    assert.deepEqual(await s.core.query("t", input, AbortSignal.abort()), {
+      status: "Cancelled",
+    });
+    assert.equal(s.core.status().length, 0);
+    assert.deepEqual(await s.core.query("t", input, AbortSignal.timeout(200)), {
+      status: "Cancelled",
+    });
+    for (const client of s.clients) if (client.pid) pids.push(client.pid);
+  } finally {
+    await s.close();
+  }
+  assert.ok(s.clients.every((client) => client.state === "stopped"));
+  for (const pid of pids) assert.throws(() => process.kill(pid, 0));
+});

@@ -327,9 +327,18 @@ export class SemanticQueries {
     signal: AbortSignal,
   ): Promise<unknown> {
     const input = parseQuery(raw);
-    const { w, file } = await this.document(input, signal);
-    input.filePath = file.file;
-    const i = await this.ports.instance(w, file.file, signal);
+    let w: Workspace;
+    let file: DiskFile;
+    let i: Instance | undefined;
+    try {
+      ({ w, file } = await this.document(input, signal));
+      input.filePath = file.file;
+      i = await this.ports.instance(w, file.file, signal);
+    } catch (error) {
+      // 准备期取消与执行期使用同一状态，安全和配置错误仍透传，此时尚未增加inflight。
+      if (signal.aborted) return { status: "Cancelled" };
+      throw error;
+    }
     if (!i) return { status: "Unsupported", reason: "无匹配服务器。" };
     const aggregate =
       input.operation === "workspaceSymbol" &&

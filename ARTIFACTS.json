@@ -1,7 +1,7 @@
 {
   "version": "0.2.2",
-  "sourceHash": "6ecf2280ff2597072a89b92ea5f99f30bc28336678abc261f50fa2245029c5b1",
-  "buildHash": "6dfbd9ac3596e0fcf6478ed129e8000efc7893049602e9e28cc472684f6d145e",
+  "sourceHash": "0dd4f635c24ba7c1351dd7ca84e8a4682d09d9eb5c470390c9a587659f4d0bf9",
+  "buildHash": "612bbc5755e4b23d8d5884ab32fd1f5933e5edd437c9bdd4c28406e5a6bf1d37",
   "guardHash": "43dd7d063b55c9d92b888c3bf5fdda3039549558e58dfc01133dc7c76b78e633",
   "commandHash": "75d5569700d25a0c2c63b0f8d9051d9e5827506b3a36e25ece65d616973a054a",
   "upstream": "ff1004afc819c6f39d217949784c712c0e68ca0e",
@@ -10,8 +10,8 @@
   "artifacts": [
     {
       "path": "plugins/codex-lsp/dist/cli.js",
-      "bytes": 262454,
-      "sha256": "6dfbd9ac3596e0fcf6478ed129e8000efc7893049602e9e28cc472684f6d145e"
+      "bytes": 262699,
+      "sha256": "612bbc5755e4b23d8d5884ab32fd1f5933e5edd437c9bdd4c28406e5a6bf1d37"
     },
     {
       "path": "plugins/codex-lsp/dist/guard.js",
@@ -26,7 +26,7 @@
     {
       "path": "plugins/codex-lsp/dist/build-info.json",
       "bytes": 511,
-      "sha256": "3cf1240d140d49e49c526567b9697d7070096e64d90c938d1087381aa1798dc1"
+      "sha256": "295ac685a46590b7e7770681d69fbacb8b6da7a60a4d19b759f1b1a7261c7bab"
     },
     {
       "path": "dist/plugin-install.mjs",

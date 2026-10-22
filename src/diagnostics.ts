@@ -8,6 +8,7 @@ interface Channel {
   items: Diagnostic[];
   version: number;
   complete: boolean;
+  observed: boolean;
   resultId?: string;
 }
 interface FileState {
@@ -63,6 +64,7 @@ export class DiagnosticLedger {
         version: previous?.version ?? 0,
         resultId: previous?.resultId,
         complete: false,
+        observed: false,
       });
     }
     this.files.set(workspace + "\0" + uri, {
@@ -120,6 +122,7 @@ export class DiagnosticLedger {
       items: unchanged ? old!.items : items,
       version: version ?? f.version,
       complete: version !== undefined,
+      observed: true,
       resultId: resultId ?? old?.resultId,
     });
   }
@@ -131,6 +134,16 @@ export class DiagnosticLedger {
         !file.deleted &&
         !file.excluded &&
         !this.trusted(file),
+    );
+  }
+  /** 区分尚无回应与已收到无版本观察，后者不等待服务器从不发送的版本号。 */
+  awaiting(workspace: string): boolean {
+    return [...this.files.values()].some(
+      (file) =>
+        file.workspace === workspace &&
+        !file.deleted &&
+        !file.excluded &&
+        [...file.channels.values()].some((channel) => !channel.observed),
     );
   }
 

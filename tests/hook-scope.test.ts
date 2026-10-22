@@ -366,3 +366,35 @@ test("文件被gitignore排除时明确移出范围，不伪报删除或修复�
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("诊断尚未返回时不因100ms短窗口提前丢失同轮错误", async () => {
+  const root = await fs.realpath(
+    await fs.mkdtemp(join(tmpdir(), "codex-lsp-late-push-")),
+  );
+  await fs.writeFile(join(root, "main.ts"), "ERROR");
+  const core = testCore(root, "push", Date.now, {
+    publishDelayMs: 250,
+    publishVersion: 1,
+  });
+  const adapter = new CodexAdapter(core, join(root, ".data"));
+  try {
+    const result = await adapter.call(
+      "diagnostics_before_stop",
+      {
+        cwd: root,
+        sessionId: "late-session",
+        turnId: "late-turn",
+        stopHookActive: false,
+      },
+      { threadId: "late-thread" },
+      AbortSignal.timeout(1500),
+    );
+    const value = JSON.parse(result.content[0].text);
+    assert.equal(value.decision, "block");
+    assert.match(value.reason, /error on line/);
+    assert.doesNotMatch(value.reason, /diagnostics-unknown|诊断超时/);
+  } finally {
+    await core.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

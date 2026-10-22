@@ -481,7 +481,7 @@ export class Core {
         i.workspace,
       );
   }
-  /** 内容摘要对账不猜Shell写集合，默认等待可信诊断至取消，Hook传false只等100ms并明确保留未确认状态。 */
+  /** 内容摘要对账不猜Shell写集合，默认等待可信诊断至取消，Hook传false仅对已收到的无版本结果短等100ms。 */
   async reconcile(
     root: string,
     signal: AbortSignal,
@@ -561,10 +561,14 @@ export class Core {
         w.reconciling = undefined;
       });
     await this.abortable(w.reconciling, signal);
-    // Hook与后台扫描只等100ms，未带版本的Push仍保留为不确定结果，不能等不存在的版本直到宿主超时。
+    // 尚无回应的通道继续等到调用预算，无版本Push则短等100ms后保留不确定性，避免丢失较慢的同轮诊断。
     let waits = 0;
     while (this.ledger.pending(w.root)) {
-      if (!waitForDiagnostics && waits++ >= 4) {
+      if (
+        !waitForDiagnostics &&
+        !this.ledger.awaiting(w.root) &&
+        waits++ >= 4
+      ) {
         w.warnings.push("诊断仍待确认，保留版本不确定结果，不能据此确认修复。");
         break;
       }

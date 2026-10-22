@@ -11,3 +11,6 @@ pi-lsp 代码复用自 `https://github.com/yinziyang/pi-lsp` 的固定提交 `ff
 
 构建采用 legalComments:eof 保留 bundle 中第三方许可注释。
 原始协议和用户源码不随发行包公开。
+
+ignore 7.0.8为MIT许可，用于Web聚合的gitignore规则。
+其原始版权与许可文本随Plugin保留于third-party/ignore-LICENSE，供应商法律文本保持原文。

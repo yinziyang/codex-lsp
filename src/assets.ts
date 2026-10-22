@@ -32,6 +32,7 @@ export interface Asset {
 const packages: Record<string, string[]> = {
   typescript: ["typescript@5.9.3", "typescript-language-server@5.0.0"],
   pyright: ["pyright@1.1.414"],
+  basedpyright: ["basedpyright@1.40.2"],
   html: ["vscode-langservers-extracted@4.10.0"],
   css: ["vscode-langservers-extracted@4.10.0"],
 };
@@ -241,6 +242,11 @@ export async function install(
           { timeout: 600000 },
         );
         bin = join(stage, "node_modules", ".bin");
+        // basedpyright包额外导出pyright别名，移除本插件生成的这些入口以免私有PATH抢占原pyright。
+        if (server === "basedpyright")
+          for (const name of ["pyright", "pyright-langserver"])
+            for (const suffix of ["", ".cmd", ".ps1"])
+              await fs.rm(join(bin, name + suffix), { force: true });
         const lock = JSON.parse(
           await fs.readFile(join(stage, "package-lock.json"), "utf8"),
         );

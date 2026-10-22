@@ -163,3 +163,33 @@ CODEX_LSP_NATIVE_MODE=v2使用features.multi_agent_v2结构配置及non_code_mod
 TypeScript 7本机补证可运行 `CODEX_LSP_MATRIX_SERVER="tsc LSP" CODEX_LSP_EVIDENCE=<新目录> node scripts/real-matrix.mjs`，再用相同证据目录运行 `node scripts/verify-matrix.mjs`。
 脚本仅在tsc报告主版本至少7时添加该路径，并通过明确tsc命令及--lsp、--stdio参数与TS5入口区分。
 固定版本、可执行文件来源和摘要仍须单独保存，不只凭initialize版本自报判断成功。
+
+## 0.2.0候选新增能力独立验收。
+
+必须先按候选完整Git提交安装Plugin并新启动宿主，核对版本及sourceHash，不从main假定取得候选代码。
+复用满足Node>=22.18的显式PATH，不改全局Node或nvm。
+完整保留原八路径72格基线，候选新增结果另记，不将原Supported-empty计作新增语义成功。
+
+```sh
+CODEX_LSP_PLUGIN_CLI=/absolute/installed/plugin/dist/cli.js CODEX_LSP_LLVM_CLANGD=/absolute/verified/llvm/clangd CODEX_LSP_EVIDENCE=/absolute/new/evidence node scripts/capability-validation.mjs
+```
+
+该脚本仅在自有数据根安装固定basedpyright，不写用户全局配置。
+LLVM可执行文件须已受信且固定版本，脚本记录实际版本、参数及SHA256，不下载或替换系统LLVM。
+
+1. Python必须返回Child.work的实际URI及子类方法range，与原始implementation响应比较，仅含Base不通过。
+2. C和.cpp使用不同符号名及各自编译参数，出向调用必须命中各自callee的真实URI与range，不能只看非空。
+3. .cpp另须命中虚方法继承的实现位置。
+4. HTML和CSS均须覆盖至少两个文件、query筛选、修改与删除，聚合结果与逐文件原始documentSymbol按真实位置比较。
+5. 断言workspaceSymbol原生capability未被修改，聚合结果必须标明source。
+6. 纯HTML/CSS实现跳转和调用层级仍须明确Unsupported。
+7. 完整回归中的定向用例覆盖gitignore、root隔离、链接替换、FIFO或目录替换、取消、畸形符号及资源预算，不以模拟用例替代上述真实LS结果。
+8. 核对Core、LS及guard有界退出，私有basedpyright资产按所有权清理，pyright原工具不受影响。
+
+候选本机能力通过也不等于原生SubagentStop或Linux、Windows带账户Agent全矩阵通过。
+原生ThreadSpawn已证实，子Hook未观察到且归因未明，原P0门槛保持。
+
+紧凑响应预算回归运行 `node --test tests/capabilities.test.ts tests/semantic-output.test.ts tests/core.test.ts`。
+128文件上限的原始警告必须在首包保留，中文与emoji警告最多显示3条且每条100个Unicode码点，省略和缩短数量须可见。
+首包最终JSON序列化不得超过32000个UTF-8字节，不能仅比较JavaScript字符串长度。
+保留长query拒绝、完整分页及跨线程隔离，无详情缓存时也必须满足相同首响应上界。

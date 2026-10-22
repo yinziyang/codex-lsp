@@ -44,8 +44,34 @@ for (const server of matrix) {
       (value) =>
         value.event === "semantic" && value.operation === row.operation,
     );
-    assert.ok(wire, server.server + ":" + row.operation + "缺少原始响应");
-    let expected = wire.result;
+    let expected;
+    if (row.result.source === "documentSymbol-aggregation") {
+      assert.equal(row.result.complete, true);
+      expected = [];
+      const visit = (items, uri) => {
+        for (const item of items ?? []) {
+          if (item.name.toLowerCase().includes(row.result.query.toLowerCase()))
+            expected.push({
+              name: item.name,
+              kind: item.kind,
+              location: item.location ?? { uri, range: item.range },
+              ...(typeof item.containerName === "string"
+                ? { containerName: item.containerName }
+                : {}),
+            });
+          if (item.children) visit(item.children, uri);
+        }
+      };
+      const documents = trace.filter(
+        (value) => value.event === "workspace-symbol-document",
+      );
+      assert.ok(documents.length, "聚合缺少逐文档原始响应。");
+      for (const document of documents)
+        visit(document.result, document.params.textDocument.uri);
+    } else {
+      assert.ok(wire, server.server + ":" + row.operation + "缺少原始响应");
+      expected = wire.result;
+    }
     if (Array.isArray(expected))
       expected = [
         ...new Map(

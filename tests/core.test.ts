@@ -379,3 +379,24 @@ test("Core关闭必须传播LS停止失败并保留原始原因", async () => {
     await fs.rm(s.root, { recursive: true, force: true });
   }
 });
+
+test("超过详情缓存上限的真实语义响应首包仍满足32000字节", async () => {
+  const s = await setup({
+    responses: {
+      "textDocument/hover": {
+        contents: { kind: "plaintext", value: "中文🙂".repeat(600000) },
+      },
+    },
+  });
+  try {
+    const result = (await s.query("hover")) as any;
+    assert.equal(result.status, "Supported");
+    assert.equal(result.truncated, true);
+    assert.equal(result.complete, false);
+    assert.equal(result.responseId, undefined);
+    assert.match(result.detail, /缩小 query 或 limit/);
+    assert.ok(Buffer.byteLength(JSON.stringify(result), "utf8") <= 32000);
+  } finally {
+    await s.close();
+  }
+});

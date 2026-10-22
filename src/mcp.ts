@@ -178,6 +178,7 @@ export class CodexAdapter {
                 "clangd",
                 "typescript",
                 "pyright",
+                "basedpyright",
                 "html",
                 "css",
               ],

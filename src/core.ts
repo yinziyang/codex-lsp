@@ -165,7 +165,9 @@ export class Core {
     if (
       candidate.command !== process.execPath &&
       server.builtin &&
-      ["typescript", "pyright", "html", "css"].includes(server.name)
+      ["typescript", "pyright", "basedpyright", "html", "css"].includes(
+        server.name,
+      )
     ) {
       candidate.args = [
         await nodeEntry(candidate.command, signal),

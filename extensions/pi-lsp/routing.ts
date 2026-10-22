@@ -301,7 +301,7 @@ export class Router {
 		const command = this.resolve(server.command);
 		if (!command) return { missing: server.command };
 		let settings = server.settings;
-		if (server.builtin && server.name === "pyright") {
+		if (server.builtin && ["pyright", "basedpyright"].includes(server.name)) {
 			const py = pythonInterpreter(root, this.opts.env);
 			if (py) settings = deepMerge(settings ?? {}, { python: { pythonPath: py } });
 		}

@@ -1,7 +1,7 @@
 {
-  "version": "0.1.4",
-  "sourceHash": "0afb0645162af38d4d64b0d7cc8ef420ece014b90a267df838e82381ff7c74f3",
-  "buildHash": "519502c684ee374ec5d9b2e5ade097cc2b5b2e19fb84f2fe7a979c4689fa55fe",
+  "version": "0.2.0",
+  "sourceHash": "73ed2244a6449a0d97802ae9d4b1331bd63c202123c04c3d0e099a98106be080",
+  "buildHash": "9ea3c93c9c5e16d47c7f5440fa1131554d7cf5ce17584e9ed0def68a2d977b48",
   "guardHash": "43dd7d063b55c9d92b888c3bf5fdda3039549558e58dfc01133dc7c76b78e633",
   "upstream": "ff1004afc819c6f39d217949784c712c0e68ca0e",
   "codex": "83086188ae0614bd882818ff1aa23f3194962012",

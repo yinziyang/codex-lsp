@@ -1,5 +1,10 @@
 /** 固定版本 npm 官方注册表快照，更新须重新核验完整性。 */
 export const catalog = {
+  "basedpyright@1.40.2": {
+    integrity:
+      "sha512-9uld8+5tZC2Gxf8nIynyunK0N4xn01W1ApzLMXDAcuA8uJq2QSfldYn9gSbxn9MWR8wmHDo7GaEHLhlnLFHaJA==",
+    url: "https://registry.npmjs.org/basedpyright/-/basedpyright-1.40.2.tgz",
+  },
   "typescript@5.9.3": {
     integrity:
       "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==",

@@ -12,6 +12,7 @@ export const aliases: Record<string, string> = {
   js: "typescript",
   python: "pyright",
   pyright: "pyright",
+  basedpyright: "basedpyright",
   html: "html",
   css: "css",
   scss: "css",

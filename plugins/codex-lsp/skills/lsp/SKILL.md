@@ -16,3 +16,9 @@ LSP 不适用或故障时可回退 rg、文件读取或构建工具。
 新增、当前问题且归因未知、未完成、删除、已确认消失分别解读。
 诊断摘要明确省略正文时，用 diagnostics_detail 读取完整项。
 Hook 不自主修改代码，不下载服务器，不发起授权交互。
+
+HTML/CSS工作区符号可能来自documentSymbol兼容聚合，必须保留source和complete字段，不能称为服务器原生workspaceSymbol。
+complete=false或truncated=true时须说明覆盖受限，按warnings或omitted缩小范围重查。
+纯HTML/CSS实现跳转和调用层级继续Unsupported，不以文本匹配伪造语义。
+
+紧凑响应仍保留最多3条真实警告，warningsOmitted和warningsTruncated表示未显示及缩短的警告数量，不能把缩短的原因当作完整警告集合。

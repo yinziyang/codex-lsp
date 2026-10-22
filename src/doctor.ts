@@ -11,10 +11,11 @@ const extensions: Record<string, string> = {
   clangd: ".c",
   typescript: ".ts",
   pyright: ".py",
+  basedpyright: ".py",
   html: ".html",
   css: ".css",
 };
-/** 实际 initialize/initialized 后有界退出，存在文件不等于 Ready。 */
+/** 实际 initialize/initialized 后有界退出，存在文件不等于Ready，verifyAsset仅供安装验证忽略路由禁用。 */
 export async function probeServer(
   root: string,
   serverName: string,
@@ -22,6 +23,7 @@ export async function probeServer(
   directories: string[],
   signal: AbortSignal,
   createClient: (options: ClientOptions) => LspClient,
+  verifyAsset = false,
 ): Promise<unknown> {
   const settings = loadSettings({
     agentDir: join(root, "config"),
@@ -35,7 +37,9 @@ export async function probeServer(
     config.servers,
     project.servers,
   ).find((value) => value.config.name === serverName);
-  if (!selected?.enabled) throw new Error("Disabled：服务器已禁用。");
+  // 安装验证只探测指定资产，配置中的路由启禁不应改变被验证的服务器。
+  if (!selected || (!selected.enabled && !verifyAsset))
+    throw new Error("Disabled：服务器已禁用或未注册。");
   const server = selected.config;
   const router = new Router([server], {
     cwd: workspace,
@@ -51,7 +55,9 @@ export async function probeServer(
   if (
     server.builtin &&
     launch.command !== process.execPath &&
-    ["typescript", "pyright", "html", "css"].includes(serverName)
+    ["typescript", "pyright", "basedpyright", "html", "css"].includes(
+      serverName,
+    )
   ) {
     launch.args = [await nodeEntry(launch.command, signal), ...launch.args];
     launch.command = process.execPath;

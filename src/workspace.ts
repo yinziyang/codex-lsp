@@ -3,7 +3,8 @@ import { join, extname } from "node:path";
 import { createHash } from "node:crypto";
 import { check, WorkspaceWatch, type DiskFile } from "./platform.ts";
 
-const ignored = new Set([
+/** 工作区扫描固定排除的生成物与依赖目录，兼容聚合复用以免边界漂移。 */
+export const ignoredDirectories: ReadonlySet<string> = new Set([
   ".git",
   ".codex",
   "node_modules",
@@ -88,7 +89,7 @@ export class WorkspaceIndex {
           continue;
         }
         if (entry.isDirectory()) {
-          if (!ignored.has(entry.name)) directories.push(file);
+          if (!ignoredDirectories.has(entry.name)) directories.push(file);
           yield {};
           continue;
         }

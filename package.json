@@ -1,6 +1,6 @@
 {
   "name": "codex-lsp",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "官方 Plugin、共享 LSP 核心与 Pi/Codex 适配器。",
   "type": "module",
   "keywords": [
@@ -30,6 +30,7 @@
     "test:portable": "node --test \"tests/*.test.ts\""
   },
   "dependencies": {
+    "ignore": "7.0.8",
     "vscode-jsonrpc": "^9.0.2",
     "vscode-languageserver-protocol": "^3.18.3"
   },

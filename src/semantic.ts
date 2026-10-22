@@ -7,6 +7,7 @@ import {
 } from "../extensions/pi-lsp/format.ts";
 import { workspacePath, uri, type DiskFile } from "./platform.ts";
 import type { Instance, Workspace } from "./state.ts";
+import { aggregateSymbols } from "./workspace-symbols.ts";
 interface CallItem {
   thread: string;
   workspace: string;
@@ -83,6 +84,8 @@ function parseQuery(input: Record<string, unknown>): Query {
   for (const field of ["query", "callHierarchyItemId"])
     if (input[field] !== undefined && typeof input[field] !== "string")
       throw new Error("InvalidInput：" + field + " 必须为字符串。");
+  if (typeof input.query === "string" && Buffer.byteLength(input.query) > 4096)
+    throw new Error("InvalidInput：query不能超过4096个UTF-8字节。");
   return {
     operation: input.operation as Operation,
     workspaceRoot: input.workspaceRoot,
@@ -105,6 +108,59 @@ const summary = (value: unknown): unknown => {
     selectionRange: item.selectionRange,
   };
 };
+function compactText(
+  text: string,
+  maximum: number,
+): { text: string; truncated: boolean } {
+  const points: string[] = [];
+  for (const point of text) {
+    if (points.length === maximum)
+      return {
+        text: points.slice(0, maximum - 1).join("") + "…",
+        truncated: true,
+      };
+    points.push(point);
+  }
+  return { text: points.join(""), truncated: false };
+}
+/** 紧凑首响应只复制固定契约字段，最多三条百码点真实警告，并校验最终JSON的32000字节上界。 */
+export function compactSemanticResult(
+  value: Record<string, unknown>,
+  responseId?: string,
+): Record<string, unknown> {
+  const original = Array.isArray(value.warnings)
+    ? value.warnings.filter(
+        (warning): warning is string => typeof warning === "string",
+      )
+    : [];
+  const warnings = original
+    .slice(0, 3)
+    .map((warning) => compactText(warning, 100));
+  const compact = {
+    status: value.status,
+    operation: value.operation,
+    generation: value.generation,
+    omitted: value.omitted,
+    truncated: true,
+    complete: false,
+    ...(value.source
+      ? { source: value.source, scannedFiles: value.scannedFiles }
+      : {}),
+    warnings: warnings.map((warning) => warning.text),
+    warningsOmitted: original.length - warnings.length,
+    warningsTruncated: warnings.filter((warning) => warning.truncated).length,
+    text: compactText(String(value.text ?? ""), 2000).text,
+    responseId,
+    detail: responseId
+      ? "使用 lsp_detail 分页获取完整结果。"
+      : "原始结果超过4MB详情缓存上限，请缩小 query 或 limit。",
+  };
+  if (Buffer.byteLength(JSON.stringify(compact), "utf8") > 32000)
+    throw new Error(
+      "ResourceLimit：紧凑响应元数据超过32000字节，不能返回超预算首响应。",
+    );
+  return compact;
+}
 /** 管理语义请求、格式转换及有界候选与详情缓存。 */
 export class SemanticQueries {
   private ports: SemanticPorts;
@@ -243,20 +299,7 @@ export class SemanticQueries {
       )
         this.details.delete(this.details.keys().next().value!);
     }
-    return {
-      status: value.status,
-      operation: value.operation,
-      generation: value.generation,
-      omitted: value.omitted,
-      truncated: true,
-      text: Array.from(String(value.text ?? ""))
-        .slice(0, 2000)
-        .join(""),
-      responseId,
-      detail: responseId
-        ? "使用 lsp_detail 分页获取完整结果。"
-        : "原始结果超过4MB详情缓存上限，请缩小 query 或 limit。",
-    };
+    return compactSemanticResult(value, responseId);
   }
   /** 分页详情按线程和实例代次隔离，偏移单位是 UTF-16 码元。 */
   detail(thread: string, id: string, offset: number): unknown {
@@ -288,7 +331,12 @@ export class SemanticQueries {
     input.filePath = file.file;
     const i = await this.ports.instance(w, file.file, signal);
     if (!i) return { status: "Unsupported", reason: "无匹配服务器。" };
-    if (!this.supported(i, input.operation))
+    const aggregate =
+      input.operation === "workspaceSymbol" &&
+      ["html", "css"].includes(i.server.name) &&
+      !this.supported(i, input.operation) &&
+      this.supported(i, "documentSymbol");
+    if (!this.supported(i, input.operation) && !aggregate)
       return { status: "Unsupported", operation: input.operation };
     i.inflight++;
     try {
@@ -301,6 +349,30 @@ export class SemanticQueries {
       await this.ports.sync(i, file, signal);
       await i.client.whenReady(signal);
       const generation = i.generation;
+      if (aggregate) {
+        const combined = await aggregateSymbols(
+          w,
+          i,
+          input.query ?? "",
+          input.limit,
+          signal,
+          this.ports.sync,
+          this.ports.trace,
+        );
+        if (generation !== i.generation) return { status: "StaleItem" };
+        return this.bounded(thread, i, {
+          status: combined.result.length ? "Supported" : "Empty",
+          operation: input.operation,
+          workspaceRoot: w.root,
+          generation,
+          text: formatResult(
+            "workspaceSymbol",
+            combined.result as never,
+            w.root,
+          ),
+          ...combined,
+        });
+      }
       const position = { line: input.line - 1, character: input.character - 1 };
       const textDocument = { uri: uri(file.file) };
       let selected: unknown;
@@ -386,6 +458,9 @@ export class SemanticQueries {
       });
     } catch (error) {
       if (signal.aborted) return { status: "Cancelled" };
+      if ((error as Error).name === "TimeoutError")
+        return { status: "Timeout" };
+      if (String(error).includes("StaleItem")) return { status: "StaleItem" };
       if ((error as { code?: number }).code === -32601)
         return { status: "Unsupported", reason: "服务端返回 MethodNotFound。" };
       if (String(error).includes("timed out")) return { status: "Timeout" };

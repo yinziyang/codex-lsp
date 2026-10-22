@@ -137,3 +137,44 @@ node plugins/codex-lsp/dist/cli.js restart ts --instance INSTANCE_ID --workspace
 未知Server、多余定位参数、重复标志或不属于目标Core的工作区均明确失败，不能退化成全部重启。
 只失效被重启实例的调用层级项与语义详情缓存。
 协议1旧连接不支持Server定位，需新启动插件连接，详见 [控制协议](docs/控制协议.md)。
+
+## 0.2.0候选能力补齐。
+
+本版本在候选分支接受独立验收，未据此解除全面产品发布门槛。
+Python默认仍选择pyright，原有pyright配置键和python语言别名不变。
+需要继承实现跳转时，先通过包内CLI安装固定basedpyright 1.40.2，再显式选择。
+
+```sh
+node plugins/codex-lsp/dist/cli.js install basedpyright --workspace /absolute/project
+node plugins/codex-lsp/dist/cli.js configure basedpyright --json '{"enabled":true}'
+```
+
+- basedpyright是独立的规范Server标识，默认关闭。
+- 显式启用basedpyright后，该工作区默认pyright路由关闭，不运行两个Python服务器争抢同一扩展名。
+- 同时显式启用两者会明确失败，用户显式禁用仍为项目配置上限。
+- basedpyright的settings使用其官方命名空间，不自动改写原pyright配置。
+- 配置变更需要新插件进程，安装本身不切换服务器。
+- 私有资产按固定npm完整性验证，移除该包额外生成的pyright命令别名，防止影响既有pyright选择。
+
+C/C++出向调用可通过已验证的LLVM clangd支持，普通LLVM20及22源码默认启用EnableOutgoingCalls，没有独立CLI开关。
+实际方法可用性仍以真实请求为准，Apple clangd17返回MethodNotFound时继续明确Unsupported。
+可用现有configure clangd的command指定已安装LLVM可执行文件及args，不替换系统Apple clangd，不自动搜索或硬编码Homebrew路径。
+
+HTML/CSS没有声明原生workspaceSymbol时，兼容聚合当前Server项目root内真实documentSymbol，输出source=documentSymbol-aggregation。
+
+- 不修改服务器声明的capability，不把聚合标为服务器原生支持。
+- query按符号名称大小写不敏感子串筛选，返回真实URI和range。
+- 不跨其他项目root，不跟随符号链接，遵守固定忽略目录及项目内逐层gitignore。
+- 沿用Core文档版本和同步，不另建版本1会话或关闭已有文档。
+- 每次查询重新读取与比对，不复用过期文件快照。
+- 单次最多10000目录条目、128候选文件、32层目录、16MB读取、单文件2MB、每文档10000符号，聚合限时10秒且响应取消。
+- 超预算或读取失败返回complete=false及warnings，结果limit截断还报告omitted，不能当作完整工作区结果。
+- 纯HTML/CSS实现跳转及调用层级仍Unsupported，不用文本搜索伪造语义。
+
+完整新增能力复现入口见[验收手册](VALIDATION.md)。
+
+query最多4096个UTF-8字节，超限在任何文件或服务器调用前明确拒绝。
+聚合总结果另有2MB预算，超大响应仍保留source及complete=false，紧凑响应不复制任意长输入或完整路径。
+紧凑响应最多保留3条真实warnings，每条最多100个Unicode码点，warningsOmitted表示未显示的条数，warningsTruncated表示可见警告中缩短的条数。
+完整范围与完整警告仅在详情可用时分页读取，无详情缓存时仍保留有界的真实原因。
+所有紧凑响应返回前按JSON序列化UTF-8字节数检查32000字节上界。

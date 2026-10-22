@@ -47,7 +47,36 @@ export function configuredServers(
 ): { config: ServerConfig; enabled: boolean }[] {
   validateServers(user);
   validateServers(project);
-  return servers.map((original) => {
+  const python = servers.find((server) => server.name === "pyright");
+  const choices =
+    python && !servers.some((server) => server.name === "basedpyright")
+      ? [
+          ...servers,
+          {
+            ...structuredClone(python),
+            name: "basedpyright",
+            command: "basedpyright-langserver",
+            builtin: true,
+            argsOverridden: false,
+            args: ["--stdio"],
+            rootMarkers: [
+              "pyproject.toml",
+              "pyrightconfig.json",
+              "setup.cfg",
+              "setup.py",
+              "requirements.txt",
+            ],
+          },
+        ]
+      : servers;
+  const selected = (name: string) =>
+    user[name]?.enabled !== false &&
+    (project[name]?.enabled ?? user[name]?.enabled) === true;
+  if (selected("basedpyright") && selected("pyright"))
+    throw new Error(
+      "Broken：Python服务器选择冲突，不能同时显式启用pyright和basedpyright。",
+    );
+  return choices.map((original) => {
     const config = structuredClone(original);
     const override: Record<string, unknown> = {
       ...user[config.name],
@@ -65,6 +94,12 @@ export function configuredServers(
     if (override.env) config.env = override.env as Record<string, string>;
     for (const field of ["settings", "initializationOptions"] as const)
       if (override[field] !== undefined) config[field] = override[field];
-    return { config, enabled: override.enabled !== false };
+    const enabled =
+      original.name === "basedpyright"
+        ? selected("basedpyright")
+        : original.name === "pyright" && selected("basedpyright")
+          ? false
+          : override.enabled !== false;
+    return { config, enabled };
   });
 }

@@ -28,3 +28,8 @@ Plugin 更新用同一标识重新 add，保存旧包、配置与启禁状态，
 省略Server明确表示全工作区重启。
 只能给一个可选Server，未知目标或剩余参数必须报告失败，不以省略参数重试成全部重启。
 协议1旧Core不支持指定Server时应提示新启动插件连接，不能将更新的CLI当作旧Core已升级。
+
+Python默认仍为pyright，需要实现跳转时可审阅 `install basedpyright` 固定1.40.2计划，再显式 `configure basedpyright --json '{"enabled":true}'`。
+安装不自动切换路由，启用basedpyright时默认pyright被选项替代，同时显式启用两者必须报告冲突。
+要恢复pyright先显式关闭basedpyright，不丢弃既有pyright配置。
+C/C++出向调用需真实LLVM clangd支持，可通过现有configure指定已验证的可执行文件和参数，不替换Apple系统clangd，不凭版本或callHierarchyProvider就承诺outgoingCalls可用。

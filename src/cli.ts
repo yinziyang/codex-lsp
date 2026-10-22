@@ -1,4 +1,5 @@
 import { probeServer } from "./doctor.ts";
+import { configuredServers } from "./server-configuration.ts";
 import { guardedClient } from "./client-binding.ts";
 import { guardLeases } from "./guard-leases.ts";
 import { target } from "./servers.ts";
@@ -92,6 +93,7 @@ async function main(): Promise<void> {
         "doctor --workspace <绝对路径>",
         "plan <语言>",
         "install <语言>",
+        'install basedpyright，固定私有资产；configure basedpyright --json {"enabled":true}显式选择后须新进程',
         "install-asset rust --url <官方gz> --sha256 <校验> --version <固定版本>",
         "authorize --workspace <绝对路径>",
         "configure <语言> --json <对象>",
@@ -143,13 +145,20 @@ async function main(): Promise<void> {
       args[0] ?? "",
       signal,
       async (bin, name) => {
-        await probeServer(root, name, workspace, [bin], signal, (options) =>
-          guardedClient(
-            options,
-            join(import.meta.dirname, "guard.js"),
-            root,
-            "doctor-" + randomUUID(),
-          ),
+        await probeServer(
+          root,
+          name,
+          workspace,
+          [bin],
+          signal,
+          (options) =>
+            guardedClient(
+              options,
+              join(import.meta.dirname, "guard.js"),
+              root,
+              "doctor-" + randomUUID(),
+            ),
+          true,
         );
       },
     );
@@ -330,8 +339,11 @@ async function main(): Promise<void> {
       trusted: false,
     }).settings;
     const result = [];
-    for (const server of settings.servers) {
-      if (config.servers[server.name]?.enabled === false) {
+    for (const { config: server, enabled } of configuredServers(
+      settings.servers,
+      config.servers,
+    )) {
+      if (!enabled) {
         result.push({ server: server.name, status: "Disabled" });
         continue;
       }

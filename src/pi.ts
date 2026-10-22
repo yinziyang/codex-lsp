@@ -57,7 +57,7 @@ export default function piAdapter(pi: ExtensionAPI): void {
   ) => {
     if (!core || !context) return;
     try {
-      await core.reconcile(context.cwd, signal);
+      await core.reconcile(context.cwd, signal, false);
     } catch {}
     const text = core.ledger.collect(thread, context.cwd, id);
     if (
@@ -136,7 +136,7 @@ export default function piAdapter(pi: ExtensionAPI): void {
       AbortSignal.timeout(3000),
     ]);
     try {
-      await core.reconcile(ctx.cwd, signal);
+      await core.reconcile(ctx.cwd, signal, false);
       core.ledger.baseline(thread, ctx.cwd);
     } catch {}
   });

@@ -91,6 +91,9 @@ export function configuredServers(
       config.args = override.args as string[];
       config.argsOverridden = true;
     }
+    // 默认后台索引不再按CPU核心数扩张，显式参数及自定义命令仍完全由用户控制。
+    if (config.name === "clangd" && config.builtin && !config.argsOverridden)
+      config.args = [...config.args, "-j=2"];
     if (override.env) config.env = override.env as Record<string, string>;
     for (const field of ["settings", "initializationOptions"] as const)
       if (override[field] !== undefined) config[field] = override[field];

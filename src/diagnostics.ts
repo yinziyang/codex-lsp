@@ -16,6 +16,7 @@ interface FileState {
   version: number;
   generation: number;
   deleted: boolean;
+  excluded?: boolean;
   epoch: number;
   channels: Map<string, Channel>;
 }
@@ -70,7 +71,7 @@ export class DiagnosticLedger {
       version,
       generation,
       deleted: false,
-      epoch: old ? old.epoch + (old.deleted ? 1 : 0) : 1,
+      epoch: old ? old.epoch + (old.deleted || old.excluded ? 1 : 0) : 1,
       channels: values,
     });
   }
@@ -81,6 +82,14 @@ export class DiagnosticLedger {
       : [...this.files.values()].find((file) => file.uri === uri);
     if (file) {
       file.deleted = true;
+      file.channels.clear();
+    }
+  }
+  /** 移出自动扫描范围只结束跟踪，不冒充物理删除或诊断修复。 */
+  exclude(uri: string, workspace: string): void {
+    const file = this.files.get(workspace + "\0" + uri);
+    if (file) {
+      file.excluded = true;
       file.channels.clear();
     }
   }
@@ -118,7 +127,10 @@ export class DiagnosticLedger {
   pending(workspace: string): boolean {
     return [...this.files.values()].some(
       (file) =>
-        file.workspace === workspace && !file.deleted && !this.trusted(file),
+        file.workspace === workspace &&
+        !file.deleted &&
+        !file.excluded &&
+        !this.trusted(file),
     );
   }
 
@@ -212,6 +224,15 @@ export class DiagnosticLedger {
     for (const f of this.files.values()) {
       if (f.workspace !== workspace) continue;
       const scope = f.workspace + "\0" + f.uri;
+      if (f.excluded) {
+        state(
+          f,
+          "excluded:" + scope + "\0" + f.epoch,
+          "文件已移出自动诊断范围，不代表问题已修复：" + displayUri(f.uri),
+        );
+        t.baseline.delete(scope);
+        continue;
+      }
       if (f.deleted) {
         state(
           f,

@@ -53,6 +53,8 @@ export class Core {
   private lifetime = new AbortController();
   private sweep: NodeJS.Timeout;
   private ports: CorePorts;
+  // 代次在整个Core内单调递增，回收后相同实例键不能重新接受旧调用层级候选。
+  private generation = 0;
   constructor(ports: CorePorts) {
     this.ports = ports;
     this.semantics = new SemanticQueries({
@@ -65,18 +67,20 @@ export class Core {
     });
     this.sweep = setInterval(() => {
       for (const i of this.instances.values())
-        if (!i.inflight && ports.now() - i.lastActive > 600000)
-          void (i.restarting ??= (async () => {
-            await i.client.stop();
-            this.expire(i);
-          })().finally(() => {
-            i.restarting = undefined;
-          })).catch(() => {});
+        if (
+          !i.inflight &&
+          !i.starting &&
+          !i.restarting &&
+          !this.workspaces.get(i.workspace)?.reconciling &&
+          ports.now() - i.lastActive > 600000
+        )
+          void this.retire(i).catch(() => {});
       for (const w of this.workspaces.values())
         if (w.index.watch.dirty && !w.reconciling)
           void this.reconcile(
             w.root,
             AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(3000)]),
+            false,
           ).catch(() => {});
     }, 1000);
     this.sweep.unref();
@@ -95,6 +99,16 @@ export class Core {
       capabilities: i.client.capabilities,
       serverInfo: i.client.serverInfo,
       failures: i.failures,
+    }));
+  }
+  /** 先有界停止再释放额度，失败时保留所有权，查询等待回收后重新查表避免复活游离实例。 */
+  private retire(i: Instance): Promise<void> {
+    return (i.restarting ??= (async () => {
+      await i.client.stop();
+      this.expire(i);
+      if (this.instances.get(i.key) === i) this.instances.delete(i.key);
+    })().finally(() => {
+      i.restarting = undefined;
     }));
   }
   private async workspace(
@@ -187,6 +201,10 @@ export class Core {
       .digest("hex");
     const key = [w.root, root, server.name, fingerprint].join("\0");
     let i = this.instances.get(key);
+    if (i?.restarting) {
+      await this.abortable(i.restarting, signal);
+      i = this.instances.get(key);
+    }
     if (!i) {
       if (this.instances.size >= 24)
         throw new Error("ResourceLimit：LS 实例达到24个上限。");
@@ -258,12 +276,13 @@ export class Core {
       });
       this.instances.set(key, inst);
     }
+    i.lastActive = this.ports.now();
     await this.running(i, signal);
     return i;
   }
   /** 失效只改变可信度，不把崩溃、空闲回收或重启合成为空诊断。 */
   private expire(i: Instance): void {
-    i.generation++;
+    i.generation = ++this.generation;
     for (const [file, doc] of i.docs)
       this.ledger.edit(
         i.workspace,
@@ -294,7 +313,7 @@ export class Core {
     )
       throw new Error("ServerError：崩溃恢复达到上限或正在冷却。");
     if (!i.starting) {
-      i.generation++;
+      i.generation = ++this.generation;
       i.docs.clear();
       i.starting = i.client
         .start()
@@ -462,74 +481,95 @@ export class Core {
         i.workspace,
       );
   }
-  /** 监听与 Hook 共用内容摘要对账，不从 Shell 命令猜写集合。 */
+  /** 内容摘要对账不猜Shell写集合，默认等待可信诊断至取消，Hook传false只等100ms并明确保留未确认状态。 */
   async reconcile(
     root: string,
     signal: AbortSignal,
+    waitForDiagnostics = true,
   ): Promise<{ complete: boolean; warnings: string[] }> {
     const w = await this.workspace(root, signal);
-    if (w.reconciling) {
-      await this.abortable(w.reconciling, signal);
-      return { complete: w.complete, warnings: w.warnings };
-    }
-    w.reconciling = (async () => {
-      const next = await w.index.readBatch(signal);
-      w.complete = next.complete;
-      w.warnings = next.warnings;
-      for (const file of next.files.values()) {
-        check(signal);
-        if (
-          [...this.instances.values()].some(
-            (i) =>
-              i.workspace === w.root &&
-              i.client.state === "running" &&
-              i.docs.get(file.file)?.hash === file.hash,
+    if (!w.reconciling)
+      w.reconciling = (async () => {
+        const next = await w.index.readBatch(signal);
+        w.complete = next.complete;
+        w.warnings = next.warnings;
+        for (const file of next.files.values()) {
+          check(signal);
+          if (
+            [...this.instances.values()].some(
+              (i) =>
+                i.workspace === w.root &&
+                i.client.state === "running" &&
+                i.docs.get(file.file)?.hash === file.hash,
+            )
           )
-        )
-          continue;
-        try {
-          const i = await this.instance(w, file.file, signal);
-          if (i) await this.sync(i, file, signal);
-        } catch (error) {
-          if (signal.aborted) throw error;
-          w.warnings.push(String(error));
-          w.index.watch.dirty = true;
-          w.complete = false;
-        }
-      }
-      if (next.complete)
-        for (const file of w.files.keys())
-          if (!next.files.has(file)) {
-            for (const i of this.instances.values())
-              if (i.workspace === w.root && i.docs.has(file)) {
-                const doc = i.docs.get(file)!;
-                i.docs.delete(file);
-                if (i.client.state === "running" && doc.opened)
-                  i.client.notify("textDocument/didClose", {
-                    textDocument: { uri: uri(file) },
-                  });
-                if (i.client.state === "running")
-                  for (const notification of fileNotifications(
-                    i.client.capabilities,
-                    i.client.registrationOptions,
-                    i.root,
-                    file,
-                    3,
-                  ))
-                    i.client.notify(notification.method, notification.params);
-              }
-            this.ledger.deleted(uri(file), w.root);
+            continue;
+          try {
+            const i = await this.instance(w, file.file, signal);
+            if (i) {
+              const current = await w.index.current(file.file, signal);
+              next.files.set(file.file, current);
+              await this.sync(i, current, signal);
+            }
+          } catch (error) {
+            if (signal.aborted) throw error;
+            w.warnings.push(String(error));
+            w.index.watch.dirty = true;
+            w.complete = false;
           }
-      if (next.complete) {
-        w.files = next.files;
-        w.scanned = true;
-      } else for (const [file, value] of next.files) w.files.set(file, value);
-      w.index.watch.dirty = !w.complete;
-      while (this.ledger.pending(w.root)) await delay(25, signal);
-    })().finally(() => {
-      w.reconciling = undefined;
-    });
-    await w.reconciling;
+        }
+        if (next.complete)
+          for (const file of w.files.keys())
+            if (!next.files.has(file)) {
+              let present: boolean;
+              try {
+                present = await w.index.present(file, signal);
+              } catch (error) {
+                if (signal.aborted) throw error;
+                next.files.set(file, w.files.get(file)!);
+                w.complete = false;
+                w.warnings.push("文件删除或范围变化无法确认：" + file);
+                continue;
+              }
+              for (const i of this.instances.values())
+                if (i.workspace === w.root && i.docs.has(file)) {
+                  const doc = i.docs.get(file)!;
+                  i.docs.delete(file);
+                  if (i.client.state === "running" && doc.opened)
+                    i.client.notify("textDocument/didClose", {
+                      textDocument: { uri: uri(file) },
+                    });
+                  if (i.client.state === "running" && !present)
+                    for (const notification of fileNotifications(
+                      i.client.capabilities,
+                      i.client.registrationOptions,
+                      i.root,
+                      file,
+                      3,
+                    ))
+                      i.client.notify(notification.method, notification.params);
+                }
+              if (present) this.ledger.exclude(uri(file), w.root);
+              else this.ledger.deleted(uri(file), w.root);
+            }
+        if (next.complete) {
+          w.files = next.files;
+          w.scanned = true;
+        } else for (const [file, value] of next.files) w.files.set(file, value);
+        w.index.watch.dirty = !w.complete;
+      })().finally(() => {
+        w.reconciling = undefined;
+      });
+    await this.abortable(w.reconciling, signal);
+    // Hook与后台扫描只等100ms，未带版本的Push仍保留为不确定结果，不能等不存在的版本直到宿主超时。
+    let waits = 0;
+    while (this.ledger.pending(w.root)) {
+      if (!waitForDiagnostics && waits++ >= 4) {
+        w.warnings.push("诊断仍待确认，保留版本不确定结果，不能据此确认修复。");
+        break;
+      }
+      await delay(25, signal);
+    }
 
     return { complete: w.complete, warnings: w.warnings };
   }

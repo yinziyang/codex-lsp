@@ -6,6 +6,7 @@ description: 通过 LSP 优先查询代码定义、引用、实现、类型、�
 涉及代码实体时先使用 lsp 工具。
 必要时用 rg 找到使用位置，再通过 LSP 跳定义或查类型。
 workspaceRoot 必须是项目绝对路径，不能用 Plugin 安装目录，普通项目默认自动授权，只有显式授权模式才需要 authorize。
+应选择实际源码项目，不把包含多个项目或验收副本的父目录当作项目根，容器目录不会自动递归诊断所有子项目。
 line 和 character 均为一基，character 按 UTF-16 码元计数。
 先用 prepareCallHierarchy 获取候选，incomingCalls 与 outgoingCalls 传原样 callHierarchyItemId。
 候选属于当前宿主线程、工作区和实例代次，StaleItem 时重新准备。

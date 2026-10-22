@@ -1,7 +1,14 @@
-import { promises as fs, constants } from "node:fs";
-import { extname, join, relative, isAbsolute } from "node:path";
+import { promises as fs } from "node:fs";
+import { extname, join } from "node:path";
 import { createHash } from "node:crypto";
-import ignore, { type Ignore } from "ignore";
+import {
+  inside,
+  readScanFile as readSymbolFile,
+  ignoreRules as rules,
+  ignored,
+  type IgnoreRule as Rule,
+} from "./scan-policy.ts";
+export { readScanFile as readSymbolFile } from "./scan-policy.ts";
 import type { Instance, Workspace } from "./state.ts";
 import { check, uri, type DiskFile } from "./platform.ts";
 import { ignoredDirectories } from "./workspace.ts";
@@ -15,109 +22,11 @@ export const symbolBudget = {
   symbols: 10000,
   depth: 32,
 } as const;
-interface Rule {
-  root: string;
-  filter: Ignore;
-}
 interface Scan {
   files: string[];
   complete: boolean;
   reasons: string[];
   entries: number;
-}
-const inside = (root: string, path: string) => {
-  const name = relative(root, path);
-  return (
-    !isAbsolute(name) &&
-    name !== ".." &&
-    !name.startsWith("../") &&
-    !name.startsWith("..\\")
-  );
-};
-/** 打开后复核真实路径和文件身份再读取，拒绝扫描后被替换的链接，句柄始终有界释放。 */
-export async function readSymbolFile(
-  root: string,
-  path: string,
-  maximum: number,
-  signal: AbortSignal,
-): Promise<Buffer> {
-  check(signal);
-  if (
-    !Number.isSafeInteger(maximum) ||
-    maximum < 0 ||
-    maximum > symbolBudget.fileBytes
-  )
-    throw new Error("InvalidInput：文件读取预算无效。");
-  if (!inside(root, path) || (await fs.realpath(path)) !== path)
-    throw new Error("文件真实路径越界或改变。");
-  // 非阻塞打开使扫描后换成FIFO的输入也能立即进入普通文件身份检查。
-  const handle = await fs.open(
-    path,
-    constants.O_RDONLY |
-      (constants.O_NOFOLLOW ?? 0) |
-      (constants.O_NONBLOCK ?? 0),
-  );
-  try {
-    const opened = await handle.stat();
-    const real = await fs.realpath(path);
-    const current = await fs.lstat(path);
-    if (
-      real !== path ||
-      current.isSymbolicLink() ||
-      !opened.isFile() ||
-      opened.dev !== current.dev ||
-      opened.ino !== current.ino
-    )
-      throw new Error("文件在打开期间被替换或真实路径越界。");
-    if (opened.size > maximum) throw new Error("文件超过读取预算。");
-    const buffer = Buffer.alloc(maximum + 1);
-    let length = 0;
-    while (length < buffer.length) {
-      check(signal);
-      const { bytesRead } = await handle.read(
-        buffer,
-        length,
-        buffer.length - length,
-        null,
-      );
-      if (!bytesRead) break;
-      length += bytesRead;
-    }
-    if (length > maximum) throw new Error("读取时文件超过预算。");
-    return buffer.subarray(0, length);
-  } finally {
-    await handle.close();
-  }
-}
-async function rules(
-  root: string,
-  inherited: Rule[],
-  signal: AbortSignal,
-): Promise<Rule[]> {
-  const path = join(root, ".gitignore");
-  try {
-    const stat = await fs.lstat(path);
-    if (stat.isSymbolicLink())
-      throw new Error("跳过符号链接gitignore，无法确认完整忽略规则。");
-    if (stat.size > 128000) throw new Error("gitignore超过128KB预算。");
-    const bytes = await readSymbolFile(root, path, 128000, signal);
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    return [...inherited, { root, filter: ignore().add(text) }];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return inherited;
-    throw error;
-  }
-}
-function ignored(path: string, directory: boolean, filters: Rule[]): boolean {
-  let answer = false;
-  for (const rule of filters) {
-    const name =
-      relative(rule.root, path).replaceAll("\\", "/") + (directory ? "/" : "");
-    const result = rule.filter.test(name);
-    if (result.ignored) answer = true;
-    else if (result.unignored) answer = false;
-  }
-  return answer;
 }
 /** 使用流式目录遍历与逐层gitignore，不跟随链接，不读取其他项目根。 */
 async function scan(

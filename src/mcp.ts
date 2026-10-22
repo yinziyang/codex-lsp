@@ -275,7 +275,11 @@ export class CodexAdapter {
     const budget = AbortSignal.any([signal, AbortSignal.timeout(3000)]);
     let state = "";
     try {
-      const result = await this.core.reconcile(input.cwd as string, budget);
+      const result = await this.core.reconcile(
+        input.cwd as string,
+        budget,
+        false,
+      );
       if (!result.complete) state = "工作区扫描未完成。";
       if (result.warnings.length)
         state += "限制：" + result.warnings.slice(0, 3).join("，");

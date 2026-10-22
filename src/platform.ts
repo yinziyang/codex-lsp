@@ -337,11 +337,27 @@ export async function scan(
 /** 文件监听只记录脏状态，Hook 内容扫描负责补偿遗漏与溢出。 */
 export class WorkspaceWatch {
   private watcher: FSWatcher | undefined;
+  private root: string;
+  private recursive: boolean;
+  private closed = false;
   dirty = true;
   error: string | undefined;
-  constructor(root: string) {
+  constructor(root: string, recursive = true) {
+    this.root = root;
+    this.recursive = recursive;
+    this.listen();
+  }
+  /** 仅已识别的项目启用递归监听，容器目录只监听顶层，关闭后不得重新打开。 */
+  setRecursive(enabled: boolean): void {
+    if (this.closed || enabled === this.recursive) return;
+    this.watcher?.close();
+    this.watcher = undefined;
+    this.recursive = enabled;
+    this.listen();
+  }
+  private listen(): void {
     try {
-      this.watcher = watch(root, { recursive: true }, () => {
+      this.watcher = watch(this.root, { recursive: this.recursive }, () => {
         this.dirty = true;
       });
       this.watcher.on("error", (error) => {
@@ -355,6 +371,7 @@ export class WorkspaceWatch {
   }
   /** 关闭幂等，不遗留监听句柄。 */
   close(): void {
+    this.closed = true;
     this.watcher?.close();
     this.watcher = undefined;
   }

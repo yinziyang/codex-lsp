@@ -2,6 +2,13 @@ import { promises as fs } from "node:fs";
 import { join, extname } from "node:path";
 import { createHash } from "node:crypto";
 import { check, WorkspaceWatch, type DiskFile } from "./platform.ts";
+import {
+  ignoreRules,
+  inside,
+  ignored,
+  readScanFile,
+  type IgnoreRule,
+} from "./scan-policy.ts";
 
 /** 工作区扫描固定排除的生成物与依赖目录，兼容聚合复用以免边界漂移。 */
 export const ignoredDirectories: ReadonlySet<string> = new Set([
@@ -48,6 +55,37 @@ interface ScanEvent {
   warning?: string;
   incomplete?: boolean;
 }
+const projectMarkers = [
+  ".git",
+  "go.mod",
+  "Cargo.toml",
+  "package.json",
+  "tsconfig.json",
+  "pyproject.toml",
+  "setup.py",
+  "compile_commands.json",
+  ".clangd",
+  "CMakeLists.txt",
+];
+/** 容器目录不自动扫描其中独立项目，实际项目内部仍包含monorepo子包。 */
+async function projectDirectory(
+  directory: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  for (const marker of projectMarkers) {
+    check(signal);
+    try {
+      await fs.lstat(join(directory, marker));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return (await fs.readdir(directory, { withFileTypes: true })).some(
+    (entry) =>
+      entry.isFile() && extensions.has(extname(entry.name).toLowerCase()),
+  );
+}
 /** 工作区监听、分批内容扫描与快照拥有者，不包含 LSP 协议。 */
 export class WorkspaceIndex {
   readonly watch: WorkspaceWatch;
@@ -59,19 +97,64 @@ export class WorkspaceIndex {
   private root: string;
   constructor(root: string) {
     this.root = root;
-    this.watch = new WorkspaceWatch(root);
+    this.watch = new WorkspaceWatch(root, false);
+  }
+  /** 启动服务器后重新读取当前内容，避免等待期间的旧扫描快照回写并倒退文档版本。 */
+  async current(file: string, signal: AbortSignal): Promise<DiskFile> {
+    check(signal);
+    const stat = await fs.lstat(file);
+    if (stat.size > 2000000) throw new Error("文件超过2MB扫描预算。");
+    const bytes = await readScanFile(this.root, file, stat.size, signal);
+    if (bytes.includes(0))
+      throw new Error("文件包含二进制内容，不能作为源码同步。");
+    return {
+      file,
+      text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+      size: bytes.length,
+      hash: createHash("sha256").update(bytes).digest("hex"),
+    };
+  }
+  /** 仅查目录项是否存在，不读取被排除的源码，区分删除和移出扫描范围。 */
+  async present(file: string, signal: AbortSignal): Promise<boolean> {
+    check(signal);
+    if (!inside(this.root, file))
+      throw new Error("InvalidInput：文件路径越界。");
+    try {
+      await fs.lstat(file);
+      check(signal);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
   }
   private async *walk(): AsyncGenerator<ScanEvent> {
-    const directories = [this.root];
+    const project = await projectDirectory(this.root, this.signal);
+    this.watch.setRecursive(project);
+    if (!project) {
+      yield {
+        warning:
+          "当前目录未识别为源码项目，不自动遍历其中的子项目，请以实际项目目录启动Codex。",
+      };
+      return;
+    }
+    const directories = [{ path: this.root, filters: [] as IgnoreRule[] }];
     let entriesSeen = 0;
     while (directories.length) {
       check(this.signal);
-      const directory = directories.pop()!;
+      const current = directories.pop()!;
+      const directory = current.path;
+      let filters: IgnoreRule[];
       let entries;
       try {
+        filters = await ignoreRules(directory, current.filters, this.signal);
         entries = await fs.readdir(directory, { withFileTypes: true });
-      } catch {
-        yield { warning: "目录读取失败：" + directory, incomplete: true };
+      } catch (error) {
+        if (this.signal.aborted) throw error;
+        yield {
+          warning: "目录或忽略规则读取失败：" + directory,
+          incomplete: true,
+        };
         continue;
       }
       for (const entry of entries) {
@@ -88,8 +171,28 @@ export class WorkspaceIndex {
           yield { warning: "跳过符号链接：" + file };
           continue;
         }
+        if (ignored(file, entry.isDirectory(), filters)) continue;
         if (entry.isDirectory()) {
-          if (!ignoredDirectories.has(entry.name)) directories.push(file);
+          if (!ignoredDirectories.has(entry.name)) {
+            try {
+              let repository = false;
+              try {
+                await fs.lstat(join(file, ".git"));
+                repository = true;
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+                  throw error;
+              }
+              if (repository)
+                yield {
+                  warning: "跳过独立项目，请以该项目为工作区查询：" + file,
+                };
+              else directories.push({ path: file, filters });
+            } catch (error) {
+              if (this.signal.aborted) throw error;
+              yield { warning: "项目边界无法确认：" + file, incomplete: true };
+            }
+          }
           yield {};
           continue;
         }
@@ -101,25 +204,7 @@ export class WorkspaceIndex {
           continue;
         }
         try {
-          const stat = await fs.stat(file);
-          if (stat.size > 2_000_000) {
-            yield { warning: "跳过超过2MB文件：" + file };
-            continue;
-          }
-          const bytes = await fs.readFile(file, { signal: this.signal });
-          if (bytes.includes(0)) {
-            yield { warning: "跳过二进制：" + file };
-            continue;
-          }
-          const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-          yield {
-            file: {
-              file,
-              text,
-              size: stat.size,
-              hash: createHash("sha256").update(bytes).digest("hex"),
-            },
-          };
+          yield { file: await this.current(file, this.signal) };
         } catch (error) {
           if (this.signal.aborted) throw error;
           yield { warning: "文件读取失败：" + file, incomplete: true };

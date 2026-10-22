@@ -11,6 +11,8 @@ description: 通过包内 CLI 与可审阅计划管理语言服务器及插件�
 - 查看使用 `node <Plugin根>/dist/cli.js list`。
 - 无需AI的终端入口使用包内 command-install 安装，之后运行 codex-lsp status 查看表格，codex-lsp install python 选择并安装Python服务器。
 - 普通项目默认自动授权，explicit模式才需逐项目authorize，项目自定义命令仍需trust-project。
+- 实例满时先核对workspace与项目root，父目录中的历史副本不应纳入自动诊断，空闲实例成功停止后才释放额度，unknown进程身份不能当作残留而删除或杀进程。
+- 内置clangd保留后台索引，默认两个工作线程，用户自定义参数和命令不自动改写，历史CPU峰值需有当时的进程证据才可归因。
 - 验证使用 `doctor --workspace <项目绝对路径>`，只有真实 initialize 成功才称 Ready。
 - 安装使用 `plan <语言>` 与 `install <语言> --workspace <项目绝对路径>`。
 - Rust 新安装使用官方固定版本资产及 SHA256 的 install-asset，不擅自修改 rustup 工具链。

@@ -7,6 +7,7 @@ const artifacts = [];
 for (const path of [
   "plugins/codex-lsp/dist/cli.js",
   "plugins/codex-lsp/dist/guard.js",
+  "plugins/codex-lsp/dist/command.js",
   "plugins/codex-lsp/dist/build-info.json",
   "dist/plugin-install.mjs",
 ]) {

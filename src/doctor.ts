@@ -24,7 +24,7 @@ export async function probeServer(
   signal: AbortSignal,
   createClient: (options: ClientOptions) => LspClient,
   verifyAsset = false,
-): Promise<unknown> {
+) {
   const settings = loadSettings({
     agentDir: join(root, "config"),
     cwd: workspace,

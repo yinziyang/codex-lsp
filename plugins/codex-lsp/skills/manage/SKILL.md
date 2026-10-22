@@ -4,11 +4,13 @@ description: 通过包内 CLI 与可审阅计划管理语言服务器及插件�
 ---
 
 调用 lsp_manage 的 list、doctor 或 plan-install 获取状态与计划。
-安装计划只展示，不自行执行命令。
-向用户展示固定版本、校验来源、目标目录、网络访问和副作用，再通过 Codex 原生 Shell 审批执行包内 CLI。
+安装前展示固定版本、校验来源、目标目录、网络访问和副作用。
+用户明确要求安装时，在宿主现有执行权限内运行包内 CLI，不重复索要确认，不要求不存在的提权审批。
 不要把信任 Hook 当作安装或清理权限。
 
 - 查看使用 `node <Plugin根>/dist/cli.js list`。
+- 无需AI的终端入口使用包内 command-install 安装，之后运行 codex-lsp status 查看表格，codex-lsp install python 选择并安装Python服务器。
+- 普通项目默认自动授权，explicit模式才需逐项目authorize，项目自定义命令仍需trust-project。
 - 验证使用 `doctor --workspace <项目绝对路径>`，只有真实 initialize 成功才称 Ready。
 - 安装使用 `plan <语言>` 与 `install <语言> --workspace <项目绝对路径>`。
 - Rust 新安装使用官方固定版本资产及 SHA256 的 install-asset，不擅自修改 rustup 工具链。

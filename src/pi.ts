@@ -17,7 +17,7 @@ import {
 } from "../extensions/pi-lsp/tool.ts";
 import { OPERATIONS } from "../extensions/pi-lsp/format.ts";
 import { dataRoot, execute } from "./platform.ts";
-import { configuration } from "./configuration.ts";
+import { configuration, workspaceAuthorized } from "./configuration.ts";
 import { assets, installPlan } from "./assets.ts";
 
 /** Pi 与 Codex 使用同一 Core，适配器只负责宿主事件和展示。 */
@@ -120,9 +120,7 @@ export default function piAdapter(pi: ExtensionAPI): void {
           thread,
         ),
       authorized: async (workspace) =>
-        workspace === ctx.cwd &&
-        (ctx.isProjectTrusted() ||
-          config.authorizedWorkspaces.includes(workspace)),
+        workspace === ctx.cwd && workspaceAuthorized(config, workspace),
       serverOverrides: () => config.servers,
       toolDirectories: () => owned.map((x) => x.binDirectory),
       settings: () => settings.settings,

@@ -2,6 +2,10 @@ import { probeServer } from "./doctor.ts";
 import { configuredServers } from "./server-configuration.ts";
 import { guardedClient } from "./client-binding.ts";
 import { guardLeases } from "./guard-leases.ts";
+import { createInterface } from "node:readline/promises";
+import { homedir } from "node:os";
+import { statusTable, pythonServer } from "./management.ts";
+import { installCommand } from "./command-install.ts";
 import { target } from "./servers.ts";
 import { promises as fs } from "node:fs";
 import { join, dirname, resolve } from "node:path";
@@ -14,6 +18,9 @@ import { dataRoot, findCommand, atomicJson } from "./platform.ts";
 import {
   configuration,
   authorize,
+  workspaceAuthorized,
+  setAuthorizationMode,
+  selectPython,
   configure,
   trustProject,
   projectOverrides,
@@ -90,12 +97,17 @@ async function main(): Promise<void> {
       commands: [
         "serve",
         "list",
+        "status，表格显示所有服务器的启用与安装状态",
+        "command-install [--directory <目录>]，安装无需AI的codex-lsp短命令",
         "doctor --workspace <绝对路径>",
         "plan <语言>",
         "install <语言>",
+        "install python [--server basedpyright|pyright]，交互选择并启用，脚本需明确指定server",
+        "enable <服务器> / disable <服务器>，配置变更在新Codex会话生效",
         'install basedpyright，固定私有资产；configure basedpyright --json {"enabled":true}显式选择后须新进程',
         "install-asset rust --url <官方gz> --sha256 <校验> --version <固定版本>",
         "authorize --workspace <绝对路径>",
+        "authorization auto|explicit，默认auto无需逐项目授权，自定义项目命令仍需trust-project",
         "configure <语言> --json <对象>",
         "restart [Server或语言别名] --instance <ID> --workspace <绝对路径>，省略Server重启该工作区全部Server及项目根",
         "uninstall <语言>",
@@ -104,11 +116,55 @@ async function main(): Promise<void> {
         "version",
       ],
       permission:
-        "LS 可读写项目并可能运行构建脚本，先审阅并 authorize 工作区。",
+        "默认自动允许普通项目启动；LS可读写项目并可能运行构建脚本，项目自定义命令仍需trust-project。",
     });
     return;
   }
   const signal = lifetime.signal;
+  if (command === "command-install") {
+    const directory = resolve(
+      option("directory") ?? join(homedir(), ".local/bin"),
+    );
+    const path = await installCommand(
+      directory,
+      join(import.meta.dirname, "command.js"),
+      process.execPath,
+      process.platform,
+      signal,
+    );
+    print({
+      installed: path,
+      usage: "codex-lsp status / codex-lsp install python",
+      notice:
+        "目录需在PATH中；此命令跟随当前已安装插件版本，插件更新后新开Codex会话。",
+    });
+    return;
+  }
+  if (command === "enable" || command === "disable") {
+    if (args.length !== 1)
+      throw new Error("InvalidInput：需要一个服务器名称。");
+    const name = target(args[0]);
+    if (command === "enable" && ["pyright", "basedpyright"].includes(name))
+      await selectPython(root, name, signal);
+    else await configure(root, name, { enabled: command === "enable" }, signal);
+    print({
+      server: name,
+      enabled: command === "enable",
+      newProcessRequired: true,
+    });
+    return;
+  }
+  if (command === "authorization") {
+    if (args.length !== 1)
+      throw new Error("InvalidInput：需要一个授权模式 auto 或 explicit。");
+    await setAuthorizationMode(root, args[0], signal);
+    print({
+      workspaceAuthorization: args[0],
+      projectCommandsTrusted: false,
+      newProcessRequired: true,
+    });
+    return;
+  }
   if (command === "authorize") {
     await authorize(root, workspace, signal);
     print({
@@ -140,6 +196,35 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "install") {
+    const server = option("server");
+    const choosingPython = args[0]?.toLowerCase() === "python";
+    if (server && !choosingPython)
+      throw new Error("InvalidInput：--server 仅用于 install python。");
+    if (choosingPython) {
+      if (server) args[0] = pythonServer(server);
+      else {
+        if (!process.stdin.isTTY || !process.stdout.isTTY)
+          throw new Error(
+            "InvalidInput：非交互环境请使用 install python --server basedpyright 或 --server pyright。",
+          );
+        const prompt = createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        });
+        try {
+          process.stdout.write(
+            "选择Python服务器，安装成功后将启用所选服务器并关闭另一个Python路由。\n1. basedpyright（支持已验收的实现跳转）\n2. pyright（原有默认服务器）\n",
+          );
+          args[0] = pythonServer(
+            await prompt.question("请输入编号或服务器名：", {
+              signal: AbortSignal.any([signal, AbortSignal.timeout(300000)]),
+            }),
+          );
+        } finally {
+          prompt.close();
+        }
+      }
+    }
     const asset = await install(
       root,
       args[0] ?? "",
@@ -162,7 +247,14 @@ async function main(): Promise<void> {
         );
       },
     );
-    print({ status: "Ready", asset });
+    if (choosingPython) await selectPython(root, args[0], signal);
+    print({
+      status: "Ready",
+      asset,
+      ...(choosingPython
+        ? { selected: args[0], newProcessRequired: true }
+        : {}),
+    });
     return;
   }
   if (command === "install-asset") {
@@ -332,7 +424,7 @@ async function main(): Promise<void> {
   const config = await configuration(root, signal);
   const owned = await assets(root, signal);
   const directories = owned.map((x) => x.binDirectory);
-  if (command === "list" || command === "doctor") {
+  if (command === "list" || command === "status" || command === "doctor") {
     const settings = loadSettings({
       agentDir: join(root, "config"),
       cwd: workspace,
@@ -343,12 +435,12 @@ async function main(): Promise<void> {
       settings.servers,
       config.servers,
     )) {
-      if (!enabled) {
+      if (!enabled && command === "doctor") {
         result.push({ server: server.name, status: "Disabled" });
         continue;
       }
       if (command === "doctor") {
-        if (!config.authorizedWorkspaces.includes(workspace)) {
+        if (!workspaceAuthorized(config, workspace)) {
           result.push({
             server: server.name,
             status: "PermissionRequired",
@@ -392,15 +484,23 @@ async function main(): Promise<void> {
         );
         result.push({
           server: server.name,
+          enabled,
           status: path ? "Installed" : "Missing",
           path,
           readiness: "仅 doctor 真实初始化后才报告 Ready。",
         });
       }
     }
+    if (command === "status") {
+      process.stdout.write(
+        statusTable(result, config.workspaceAuthorization ?? "auto"),
+      );
+      return;
+    }
     print({
       servers: result,
       assets: owned,
+      workspaceAuthorization: config.workspaceAuthorization,
       automaticFeedback: {
         enabled: "须在宿主 Plugin 管理中确认。",
         trusted: "须在 /hooks 审阅当前定义。",
@@ -425,7 +525,7 @@ async function main(): Promise<void> {
         coreId,
       ),
     authorized: async (value, signal) =>
-      (await configuration(root, signal)).authorizedWorkspaces.includes(value),
+      workspaceAuthorized(await configuration(root, signal), value),
     serverOverrides: () => config.servers,
     projectOverrides: (workspace, signal) =>
       projectOverrides(root, workspace, signal),

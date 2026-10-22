@@ -61,29 +61,66 @@ node dist/plugin-install.mjs
 安装或更新后关闭测试 Codex，再新启动进程。
 在 `/hooks` 正式审阅五类 Hook。
 插件启用不代表 Hook 已信任，也不代表 MCP 已连接或自动反馈已被模型读取。
-在新 Codex 会话中使用本插件的 setup 技能检查语言服务器并授权项目目录。
+在新 Codex 会话中使用本插件的 setup 技能检查语言服务器与连接状态。
+普通项目默认自动授权，无需逐项目确认或手动运行 authorize。
 下列手动 CLI 示例需在源码仓库根目录执行，GitHub 市场安装可通过 setup 技能完成配置。
 
 ```sh
-node plugins/codex-lsp/dist/cli.js authorize --workspace /absolute/project
 node plugins/codex-lsp/dist/cli.js doctor --workspace /absolute/project
 ```
 
-授权前应了解 LS 可以读写工作区、联网或执行项目构建脚本。
+LS 可以读写工作区、联网或执行项目构建脚本，自动授权不改变宿主的文件系统与执行权限。
 项目 `.codex-lsp.json` 的命令、参数、环境等覆盖配置只有经 `trust-project` 对当前内容摘要授权才执行。
 内容变化需要重新审阅。
+
+### 无需 AI 的终端管理。
+
+macOS/Linux 用户只需安装一次用户级短命令，命令自动跟随当前 Codex 已安装插件版本，无需每次输入插件缓存路径。
+从源码开发时在仓库根目录运行下列命令，GitHub 市场安装时将 CLI 路径替换为插件安装目录中的 dist/cli.js。
+
+```sh
+node plugins/codex-lsp/dist/cli.js command-install
+codex-lsp status
+codex-lsp install python
+```
+
+- 默认安装到 `~/.local/bin/codex-lsp`，该目录需已在 PATH 中，可通过 `--directory` 指定其他用户可写目录。
+- 命令固定安装时的 Node 可执行路径，避免默认 Shell 中的旧 Node 导致启动失败，不修改 Node 默认版本或 Shell 配置。
+- `status` 用表格分别显示每个服务器的启用状态、是否检测到可执行文件及其路径，发现可执行文件不等于真实初始化成功。
+- `install python` 交互选择 basedpyright 或 pyright，安装并验证成功后启用所选服务器并关闭另一条 Python 路由。
+- 非交互脚本使用 `codex-lsp install python --server basedpyright` 或 `--server pyright`，不隐式选择或等待输入。
+- 其他语言直接使用 `codex-lsp install go` 等已有语言别名，服务器安装来源与限制见下文。
+- Windows 暂使用 `node <插件根>/dist/cli.js status` 等相同子命令，尚不提供用户级短命令安装器。
+
+```sh
+codex-lsp enable basedpyright
+codex-lsp disable html
+codex-lsp doctor --workspace /absolute/project
+codex-lsp uninstall basedpyright
+```
+
+配置变更后新开 Codex 会话生效，卸载不会删除用户已有工具，正在使用的私有资产会拒绝卸载。
+如需恢复逐项目授权，可显式切换模式，已有授权记录仍保留。
+
+```sh
+codex-lsp authorization explicit
+codex-lsp authorize --workspace /absolute/project
+codex-lsp authorization auto
+```
+
+授权模式变更后新开 Codex 会话生效，项目自定义启动命令的 trust-project 校验不受该开关影响。
 
 ## 使用。
 
 - 定义、引用、类型、文档、符号、实现和调用关系优先调用 `lsp`。
-- `lsp` 的行列为一基 UTF-16，工作区根必须是已授权的绝对路径。
+- `lsp` 的行列为一基 UTF-16，工作区根必须是项目绝对路径，普通项目默认自动授权。
 - 服务器明确不支持时返回 `Unsupported`，空语义结果返回 `Empty`。
 - 调用层级先 `prepareCallHierarchy`，再用本线程的候选标识查询 incoming 或 outgoing。
 - 大结果通过 `lsp_detail` 分页。
 - 自动诊断由同一 MCP 连接上的五类 Hook 触发，不要求模型主动查诊断。
 - 单批反馈最多十条每文件、三十条总量和八千 UTF-8 字节，摘要和完整详情分别记账。
 - `diagnostics_remaining` 获取余项，`diagnostics_detail` 查看原始诊断。
-- `lsp_manage` 生成只读管理计划，安装与卸载由 Skill 引导原生 Shell 审批运行内部 CLI。
+- `lsp_manage` 生成只读管理计划，安装与卸载可直接用终端 CLI，也可由 Skill 在宿主现有执行权限内运行。
 
 ```sh
 node plugins/codex-lsp/dist/cli.js list

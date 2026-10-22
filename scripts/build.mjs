@@ -68,6 +68,19 @@ await build({
   minify: false,
 });
 await build({
+  entryPoints: [join(root, "src/command-entry.ts")],
+  outfile: join(output, "command.js"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22.18",
+  banner: {
+    js: "import {createRequire} from 'node:module'; const require = createRequire(import.meta.url);",
+  },
+  legalComments: "eof",
+  minifyWhitespace: true,
+});
+await build({
   entryPoints: [join(root, "src/guard.ts")],
   outfile: join(output, "guard.js"),
   bundle: true,
@@ -83,6 +96,9 @@ await build({
 const guardHash = createHash("sha256")
   .update(await fs.readFile(join(output, "guard.js")))
   .digest("hex");
+const commandHash = createHash("sha256")
+  .update(await fs.readFile(join(output, "command.js")))
+  .digest("hex");
 const buildHash = createHash("sha256")
   .update(await fs.readFile(join(output, "cli.js")))
   .digest("hex");
@@ -94,6 +110,7 @@ await fs.writeFile(
       sourceHash,
       buildHash,
       guardHash,
+      commandHash,
       upstream: "ff1004afc819c6f39d217949784c712c0e68ca0e",
       codex: "83086188ae0614bd882818ff1aa23f3194962012",
       format: "official-legacy-plugin",

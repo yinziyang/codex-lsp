@@ -16,6 +16,8 @@ import {
 export interface Configuration {
   schemaVersion: number;
   authorizedWorkspaces: string[];
+  /** auto 默认允许普通项目启动，explicit 只允许已有授权记录，均不信任项目命令。 */
+  workspaceAuthorization?: "auto" | "explicit";
   servers: Record<string, Record<string, unknown>>;
   [key: string]: unknown;
 }
@@ -62,6 +64,12 @@ export async function configuration(
   )
     throw new Error("Broken：配置 schemaVersion 或字段错误，原文件保留。");
   validateServers(x.servers);
+  if (
+    x.workspaceAuthorization !== undefined &&
+    !["auto", "explicit"].includes(x.workspaceAuthorization)
+  )
+    throw new Error("Broken：workspaceAuthorization 必须为 auto 或 explicit。");
+  x.workspaceAuthorization ??= "auto";
   if (
     x.trustedProjects !== undefined &&
     (!x.trustedProjects ||
@@ -135,7 +143,53 @@ export async function locked<T>(
   }
 }
 
-/** 显式授权工作区后，Hook 才能按需启动语言服务器。 */
+/** 普通工作区默认自动授权，显式模式仍精确匹配已有记录，不改变项目命令信任。 */
+export function workspaceAuthorized(
+  config: Configuration,
+  workspace: string,
+): boolean {
+  return (
+    config.workspaceAuthorization !== "explicit" ||
+    config.authorizedWorkspaces.includes(workspace)
+  );
+}
+
+/** 原子切换Python路由，保留两者既有参数，不留下同时启用的中间状态。 */
+export async function selectPython(
+  root: string,
+  name: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (name !== "pyright" && name !== "basedpyright")
+    throw new Error("InvalidInput：不支持的Python服务器。");
+  await locked(root, signal, async () => {
+    const config = await configuration(root, signal);
+    for (const server of ["pyright", "basedpyright"])
+      config.servers[server] = {
+        ...config.servers[server],
+        enabled: server === name,
+      };
+    validateServers(config.servers);
+    await atomicJson(join(root, "config/settings.json"), config, signal);
+  });
+}
+
+/** 保存授权模式，切回显式模式时保留原有工作区记录及项目命令信任。 */
+export async function setAuthorizationMode(
+  root: string,
+  mode: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (mode !== "auto" && mode !== "explicit")
+    throw new Error("InvalidInput：授权模式必须为 auto 或 explicit。");
+  await locked(root, signal, async () => {
+    const config = await configuration(root, signal);
+    config.workspaceAuthorization = mode;
+    await atomicJson(join(root, "config/settings.json"), config, signal);
+  });
+}
+
+/** 为显式模式保存单个工作区授权，自动模式无需逐项目记录。 */
 export async function authorize(
   root: string,
   workspace: string,

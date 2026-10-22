@@ -108,7 +108,7 @@ export class Core {
     if (w) return w;
     if (!(await this.ports.authorized(actual, signal)))
       throw new Error(
-        "PermissionDenied：先通过 setup 审阅 LS 启动及构建脚本权限，再运行 CLI authorize。",
+        "PermissionDenied：当前为逐项目授权模式，请运行 authorize，或用 authorization auto 恢复自动授权。",
       );
     if (this.workspaces.size >= 16)
       throw new Error("ResourceLimit：工作区达到16个上限。");
